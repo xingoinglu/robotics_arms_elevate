@@ -1,0 +1,10 @@
+# Name of the unique YOLO class to press, for example "up" or "floor_3".
+string target_name
+---
+bool success
+string message
+---
+string state
+float32 position_error_m
+float32 angular_error_rad
+float32 target_age_s
