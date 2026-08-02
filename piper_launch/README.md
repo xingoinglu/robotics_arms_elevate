@@ -245,6 +245,8 @@ ros2 launch piper_launch all.launch.py \
 | `enable_motion` | `false` | 真机运动开关；开启前必须完成轨迹控制器验收 |
 | `enable_press` | `false` | 预留接触按压开关，要求运动已开启 |
 | `orientation_mode` | `preserve_current_roll` | 保持任务起始滚转；`world_up` 为旧行为 |
+| `coarse_horizontal_offset` | `0.0` | 粗定位水平补偿，单位米；面向电梯时正值向左、负值向右，范围 ±0.05 |
+| `coarse_lateral_tolerance` | `0.007` | 粗定位面板切平面最大误差，单位米 |
 | `enable_handeye_tf` | `true` | 发布当前功能包配置的手眼 TF |
 
 查看完整参数：

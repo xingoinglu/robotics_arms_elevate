@@ -105,8 +105,11 @@ Action 的最终 `message` 也会说明是规划成功、对准成功、完整�
 - `enable_press`：允许接触按压，要求 `enable_motion:=true`。
 - `coarse_standoff`：MoveIt 粗定位距离，默认 `0.08 m`；近距离深度出现
   大面积无效时可先增至 `0.12 m` 验证。
+- `coarse_horizontal_offset`：粗定位目标相对按钮的水平补偿，默认 `0 m`，
+  面向电梯时正值向左、负值向右，允许范围为 `-0.05~+0.05 m`。若实机
+  固定向右偏 `30 mm`，设置为 `+0.03`。
 - `coarse_lateral_tolerance`：按钮局部 XY/面板切平面的最大误差，默认
-  `0.005 m`。
+  `0.007 m`。
 - `coarse_axial_tolerance`：实际按钮法向距离相对 `coarse_standoff` 的允许
   误差，默认 `0.01 m`。
 - `coarse_correction_attempts`：首次粗定位验收超差后的 MoveIt 校正次数，
@@ -115,6 +118,13 @@ Action 的最终 `message` 也会说明是规划成功、对准成功、完整�
   时间，默认 `8 s`。不要用增大 `target_abort_age` 代替视觉修复。
 - `reacquire_max_normal_drift`：B1 相对 B0 的最大法向漂移，默认
   `0.02 m`；超限时不发送 PBVS 命令并安全回撤。
+
+例如，粗定位后实机固定向右偏 `30 mm`，启动时加入：
+
+```bash
+ros2 launch piper_launch all.launch.py \
+  coarse_horizontal_offset:=0.03
+```
 
 `/pos_cmd` 控制的是 J6 法兰。节点会根据 `link6 → tcp_link` 的
 `0.1468 m` 标定偏置自动把 TCP 目标转换成法兰目标。

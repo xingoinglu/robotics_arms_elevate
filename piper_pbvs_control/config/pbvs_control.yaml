@@ -14,9 +14,12 @@ piper_pbvs_controller:
     orientation_mode: preserve_current_roll
 
     coarse_standoff: 0.08
+    # Horizontal MoveIt target compensation in the button frame.
+    # Positive moves left when facing the panel; negative moves right.
+    coarse_horizontal_offset: 0.0
     # Coarse acceptance uses the button frame: local XY is panel lateral,
     # local Z is the press-axis distance. Retry the same C0 once if needed.
-    coarse_lateral_tolerance: 0.005
+    coarse_lateral_tolerance: 0.007
     coarse_axial_tolerance: 0.01
     coarse_correction_attempts: 1
     prepress_standoff: 0.005
@@ -33,7 +36,7 @@ piper_pbvs_controller:
     press_position_tolerance: 0.0015
     angular_tolerance: 0.052359878
 
-    stable_sample_count: 5
+    stable_sample_count: 3
     stable_position_spread: 0.003
     stable_angle_spread: 0.052359878
     stable_cycle_count: 5

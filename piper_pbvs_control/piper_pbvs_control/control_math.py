@@ -163,6 +163,13 @@ def offset_along_press_axis(position, quaternion, offset):
     return position + float(offset) * press_axis
 
 
+def offset_along_panel_horizontal(position, button_quaternion, offset):
+    """Offset along button-frame +X; positive is left facing the panel."""
+    position = np.asarray(position, dtype=np.float64).reshape(3)
+    horizontal_axis = quaternion_to_matrix(button_quaternion)[:, 0]
+    return position + float(offset) * horizontal_axis
+
+
 def coarse_standoff_errors(
     button_position,
     tcp_position,

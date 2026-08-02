@@ -44,6 +44,7 @@ from piper_pbvs_control.control_math import (
     average_stable_poses,
     coarse_standoff_errors,
     limited_pose_step,
+    offset_along_panel_horizontal,
     offset_along_press_axis,
     pose_error,
     quaternion_to_euler_xyz,
@@ -198,7 +199,8 @@ class PiperPbvsController(Node):
             'move_group_name': 'arm',
             'orientation_mode': 'preserve_current_roll',
             'coarse_standoff': 0.08,
-            'coarse_lateral_tolerance': 0.005,
+            'coarse_horizontal_offset': 0.0,
+            'coarse_lateral_tolerance': 0.007,
             'coarse_axial_tolerance': 0.01,
             'coarse_correction_attempts': 1,
             'prepress_standoff': 0.005,
@@ -213,7 +215,7 @@ class PiperPbvsController(Node):
             'position_tolerance': 0.003,
             'press_position_tolerance': 0.0015,
             'angular_tolerance': math.radians(3.0),
-            'stable_sample_count': 5,
+            'stable_sample_count': 3,
             'stable_position_spread': 0.003,
             'stable_angle_spread': math.radians(3.0),
             'stable_cycle_count': 5,
@@ -297,17 +299,22 @@ class PiperPbvsController(Node):
             setattr(self, name, bool(values[name]))
 
         offset_names = ('tcp_offset_x', 'tcp_offset_y', 'tcp_offset_z')
-        for name in offset_names:
+        signed_float_names = offset_names + ('coarse_horizontal_offset',)
+        for name in signed_float_names:
             value = float(values[name])
             if not math.isfinite(value):
                 raise ValueError(f'{name} must be finite')
             setattr(self, name, value)
+        if abs(self.coarse_horizontal_offset) > 0.05:
+            raise ValueError(
+                'coarse_horizontal_offset must be within +/-0.05 m'
+            )
 
         excluded = set(string_names + integer_names + bool_names) | {
             'enable_motion',
             'enable_press',
             'coarse_correction_attempts',
-        } | set(offset_names)
+        } | set(signed_float_names)
         for name, value in values.items():
             if name in excluded:
                 continue
@@ -1319,7 +1326,17 @@ class PiperPbvsController(Node):
                 control_quaternion,
                 -self.coarse_standoff,
             )
+            coarse_position = offset_along_panel_horizontal(
+                coarse_position,
+                button_quaternion,
+                self.coarse_horizontal_offset,
+            )
             coarse_quaternion = control_quaternion
+            self.get_logger().info(
+                '【粗定位水平补偿】'
+                f'{self.coarse_horizontal_offset * 1000.0:+.1f} mm '
+                '（正值向左，负值向右）'
+            )
             coarse_pose = self._pose_message(
                 coarse_position,
                 coarse_quaternion,

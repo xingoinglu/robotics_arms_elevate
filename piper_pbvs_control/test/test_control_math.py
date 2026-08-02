@@ -10,6 +10,7 @@ from piper_pbvs_control.control_math import (
     coarse_standoff_errors,
     limited_pose_step,
     matrix_to_quaternion,
+    offset_along_panel_horizontal,
     offset_along_press_axis,
     pose_error,
     quaternion_to_euler_xyz,
@@ -125,6 +126,29 @@ def test_offset_uses_tool_positive_z_press_axis():
     )
 
     assert np.allclose(result, [0.4, 0.1, 0.22])
+
+
+def test_horizontal_offset_uses_button_positive_x_as_panel_left():
+    """Positive compensation must move left in the detected panel frame."""
+    button_quaternion = matrix_to_quaternion(np.array([
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+    ]))
+
+    left = offset_along_panel_horizontal(
+        [0.4, 0.1, 0.3],
+        button_quaternion,
+        0.03,
+    )
+    right = offset_along_panel_horizontal(
+        [0.4, 0.1, 0.3],
+        button_quaternion,
+        -0.02,
+    )
+
+    assert np.allclose(left, [0.4, 0.13, 0.3])
+    assert np.allclose(right, [0.4, 0.08, 0.3])
 
 
 def test_coarse_errors_use_button_local_normal_and_tangent_plane():

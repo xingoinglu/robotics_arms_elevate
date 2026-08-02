@@ -148,8 +148,16 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('coarse_standoff', default_value='0.08'),
         DeclareLaunchArgument(
+            'coarse_horizontal_offset',
+            default_value='0.0',
+            description=(
+                'Coarse target horizontal compensation in metres; '
+                'positive is left facing the panel.'
+            ),
+        ),
+        DeclareLaunchArgument(
             'coarse_lateral_tolerance',
-            default_value='0.005',
+            default_value='0.007',
             description='Maximum button-plane lateral error in metres.',
         ),
         DeclareLaunchArgument(
@@ -286,6 +294,9 @@ def generate_launch_description():
             'enable_press': LaunchConfiguration('enable_press'),
             'orientation_mode': LaunchConfiguration('orientation_mode'),
             'coarse_standoff': LaunchConfiguration('coarse_standoff'),
+            'coarse_horizontal_offset': LaunchConfiguration(
+                'coarse_horizontal_offset'
+            ),
             'coarse_lateral_tolerance': LaunchConfiguration(
                 'coarse_lateral_tolerance'
             ),

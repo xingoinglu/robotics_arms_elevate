@@ -42,8 +42,16 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('coarse_standoff', default_value='0.08'),
         DeclareLaunchArgument(
+            'coarse_horizontal_offset',
+            default_value='0.0',
+            description=(
+                'Coarse target horizontal compensation in metres; '
+                'positive is left facing the panel'
+            ),
+        ),
+        DeclareLaunchArgument(
             'coarse_lateral_tolerance',
-            default_value='0.005',
+            default_value='0.007',
         ),
         DeclareLaunchArgument(
             'coarse_axial_tolerance',
@@ -154,6 +162,10 @@ def generate_launch_description():
                     ),
                     'coarse_standoff': ParameterValue(
                         LaunchConfiguration('coarse_standoff'),
+                        value_type=float,
+                    ),
+                    'coarse_horizontal_offset': ParameterValue(
+                        LaunchConfiguration('coarse_horizontal_offset'),
                         value_type=float,
                     ),
                     'coarse_lateral_tolerance': ParameterValue(
