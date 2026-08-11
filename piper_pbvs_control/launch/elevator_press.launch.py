@@ -1,4 +1,6 @@
-"""Launch YOLO hand-eye perception and the guarded PBVS controller."""
+"""Launch YOLO hand-eye perception and MoveIt coarse positioning."""
+
+from typing import List
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -32,7 +34,26 @@ def generate_launch_description():
         DeclareLaunchArgument('bg_removal', default_value='false'),
         DeclareLaunchArgument('enable_handeye_tf', default_value='true'),
         DeclareLaunchArgument('enable_motion', default_value='false'),
-        DeclareLaunchArgument('enable_press', default_value='false'),
+        DeclareLaunchArgument('floor_number', default_value='1'),
+        DeclareLaunchArgument(
+            'home_joint_positions',
+            default_value='[0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]',
+            description='Six arm home joint positions in radians',
+        ),
+        DeclareLaunchArgument(
+            'home_joint_tolerance',
+            default_value='0.01',
+        ),
+        DeclareLaunchArgument(
+            'home_velocity_scaling_factor',
+            default_value='0.01',
+        ),
+        DeclareLaunchArgument(
+            'home_acceleration_scaling_factor',
+            default_value='0.01',
+        ),
+        DeclareLaunchArgument('home_timeout', default_value='20.0'),
+        DeclareLaunchArgument('press_timeout', default_value='120.0'),
         DeclareLaunchArgument(
             'orientation_mode',
             default_value='preserve_current_roll',
@@ -50,8 +71,12 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument(
-            'coarse_lateral_tolerance',
-            default_value='0.007',
+            'coarse_lateral_error_min',
+            default_value='0.023',
+        ),
+        DeclareLaunchArgument(
+            'coarse_lateral_error_max',
+            default_value='0.032',
         ),
         DeclareLaunchArgument(
             'coarse_axial_tolerance',
@@ -59,15 +84,19 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'coarse_correction_attempts',
-            default_value='1',
+            default_value='3',
         ),
         DeclareLaunchArgument(
-            'target_reacquire_timeout',
-            default_value='8.0',
+            'distance_mm',
+            default_value='0.0',
+            description=(
+                'Optional post-coarse advance displacement in mm'
+            ),
         ),
         DeclareLaunchArgument(
-            'reacquire_max_normal_drift',
-            default_value='0.02',
+            'x_advance_axis_mode',
+            default_value='base_x',
+            description='Advance axis: base_x or panel_normal',
         ),
         DeclareLaunchArgument('plane_outer_scale', default_value='2.0'),
         DeclareLaunchArgument('plane_inner_scale', default_value='1.0'),
@@ -152,10 +181,6 @@ def generate_launch_description():
                         LaunchConfiguration('enable_motion'),
                         value_type=bool,
                     ),
-                    'enable_press': ParameterValue(
-                        LaunchConfiguration('enable_press'),
-                        value_type=bool,
-                    ),
                     'orientation_mode': ParameterValue(
                         LaunchConfiguration('orientation_mode'),
                         value_type=str,
@@ -168,8 +193,12 @@ def generate_launch_description():
                         LaunchConfiguration('coarse_horizontal_offset'),
                         value_type=float,
                     ),
-                    'coarse_lateral_tolerance': ParameterValue(
-                        LaunchConfiguration('coarse_lateral_tolerance'),
+                    'coarse_lateral_error_min': ParameterValue(
+                        LaunchConfiguration('coarse_lateral_error_min'),
+                        value_type=float,
+                    ),
+                    'coarse_lateral_error_max': ParameterValue(
+                        LaunchConfiguration('coarse_lateral_error_max'),
                         value_type=float,
                     ),
                     'coarse_axial_tolerance': ParameterValue(
@@ -180,12 +209,59 @@ def generate_launch_description():
                         LaunchConfiguration('coarse_correction_attempts'),
                         value_type=int,
                     ),
-                    'target_reacquire_timeout': ParameterValue(
-                        LaunchConfiguration('target_reacquire_timeout'),
+                    'distance_mm': ParameterValue(
+                        LaunchConfiguration('distance_mm'),
                         value_type=float,
                     ),
-                    'reacquire_max_normal_drift': ParameterValue(
-                        LaunchConfiguration('reacquire_max_normal_drift'),
+                    'x_advance_axis_mode': ParameterValue(
+                        LaunchConfiguration('x_advance_axis_mode'),
+                        value_type=str,
+                    ),
+                },
+            ],
+        ),
+        Node(
+            package='piper_pbvs_control',
+            executable='elevator_sequence',
+            name='elevator_sequence',
+            output='screen',
+            parameters=[
+                controller_config,
+                {
+                    'enable_motion': ParameterValue(
+                        LaunchConfiguration('enable_motion'),
+                        value_type=bool,
+                    ),
+                    'floor_number': ParameterValue(
+                        LaunchConfiguration('floor_number'),
+                        value_type=int,
+                    ),
+                    'home_joint_positions': ParameterValue(
+                        LaunchConfiguration('home_joint_positions'),
+                        value_type=List[float],
+                    ),
+                    'home_joint_tolerance': ParameterValue(
+                        LaunchConfiguration('home_joint_tolerance'),
+                        value_type=float,
+                    ),
+                    'home_velocity_scaling_factor': ParameterValue(
+                        LaunchConfiguration(
+                            'home_velocity_scaling_factor'
+                        ),
+                        value_type=float,
+                    ),
+                    'home_acceleration_scaling_factor': ParameterValue(
+                        LaunchConfiguration(
+                            'home_acceleration_scaling_factor'
+                        ),
+                        value_type=float,
+                    ),
+                    'home_timeout': ParameterValue(
+                        LaunchConfiguration('home_timeout'),
+                        value_type=float,
+                    ),
+                    'press_timeout': ParameterValue(
+                        LaunchConfiguration('press_timeout'),
                         value_type=float,
                     ),
                 },

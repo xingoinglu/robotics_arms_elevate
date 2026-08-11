@@ -1,4 +1,4 @@
-"""MoveIt coarse approach and guarded PBVS button pressing."""
+"""Vision-guided MoveIt coarse positioning for elevator buttons."""
 
 from collections import deque
 import copy
@@ -20,7 +20,7 @@ from moveit_msgs.msg import (
 from moveit_msgs.srv import ApplyPlanningScene
 import numpy as np
 from piper_msgs.action import PressButton
-from piper_msgs.msg import PiperStatusMsg, PosCmd
+from piper_msgs.msg import PiperStatusMsg
 from piper_msgs.srv import SetInterest
 import rclpy
 from rclpy.action import (
@@ -42,40 +42,38 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from piper_pbvs_control.control_math import (
     align_tool_z_preserve_roll,
     average_stable_poses,
+    coarse_pose_is_acceptable,
     coarse_standoff_errors,
-    limited_pose_step,
+    coarse_total_attempts,
     offset_along_panel_horizontal,
     offset_along_press_axis,
     pose_error,
-    quaternion_to_euler_xyz,
     quaternion_to_matrix,
-    signed_normal_drift,
-    tcp_to_flange_pose,
+    translated_base_x,
+    x_distance_metres,
 )
 
 
 class TaskFailure(RuntimeError):
-    """Raised when a guarded press task cannot continue safely."""
+    """Raised when a guarded coarse-positioning task cannot continue."""
 
 
 class TaskCanceled(RuntimeError):
-    """Raised when the client cancels an active press task."""
+    """Raised when the client cancels an active positioning task."""
 
 
 class PiperPbvsController(Node):
-    """Coordinate perception, MoveIt, PBVS, and guarded pressing."""
+    """Coordinate perception and guarded MoveIt coarse positioning."""
 
     ARM_JOINT_NAMES = tuple(f'joint{index}' for index in range(1, 7))
+    X_POSITION_TOLERANCE = 0.006
+    X_ORIENTATION_TOLERANCE = 0.075
 
     STATE_LABELS = {
         'IDLE': '空闲',
         'WAIT_TARGET': '等待并获取按钮位姿',
         'COARSE_APPROACH': 'MoveIt 粗定位',
-        'REACQUIRE_TARGET': '粗定位后重新获取按钮位姿',
-        'PBVS_ALIGN': 'PBVS 视觉对准',
-        'PRESS': '执行按压',
-        'HOLD': '按压保持',
-        'RETRACT': '安全回撤',
+        'X_ADVANCE': 'MoveIt 按压移动',
         'DONE': '任务完成',
         'ABORT': '任务中止',
     }
@@ -130,23 +128,12 @@ class PiperPbvsController(Node):
             10,
             callback_group=self.callback_group,
         )
-        self.pos_command_pub = self.create_publisher(
-            PosCmd,
-            '/pos_cmd',
-            10,
-        )
         self.state_pub = self.create_publisher(String, '/pbvs/state', 10)
         self.desired_tcp_pub = self.create_publisher(
             PoseStamped,
             '/pbvs/desired_tcp_pose',
             10,
         )
-        self.commanded_flange_pub = self.create_publisher(
-            PoseStamped,
-            '/pbvs/commanded_flange_pose',
-            10,
-        )
-
         self.move_group_client = ActionClient(
             self,
             MoveGroup,
@@ -181,17 +168,16 @@ class PiperPbvsController(Node):
         )
         self._set_state('IDLE')
         self.get_logger().info(
-            'Piper PBVS controller ready; '
+            'Piper MoveIt coarse-positioning controller ready; '
             f'enable_motion={self.enable_motion}, '
-            f'enable_press={self.enable_press}, '
-            f'orientation_mode={self.orientation_mode}'
+            f'orientation_mode={self.orientation_mode}, '
+            f'distance_mm={self.distance_m * 1000.0:+.3f}'
         )
 
     def _declare_parameters(self):
         """Declare motion, convergence, timeout, and collision parameters."""
         defaults = {
             'enable_motion': False,
-            'enable_press': False,
             'base_frame': 'base_link',
             'tcp_frame': 'tcp_link',
             'flange_frame': 'link6',
@@ -200,41 +186,19 @@ class PiperPbvsController(Node):
             'orientation_mode': 'preserve_current_roll',
             'coarse_standoff': 0.08,
             'coarse_horizontal_offset': 0.0,
-            'coarse_lateral_tolerance': 0.007,
+            'coarse_lateral_error_min': 0.025,
+            'coarse_lateral_error_max': 0.035,
             'coarse_axial_tolerance': 0.01,
-            'coarse_correction_attempts': 1,
-            'prepress_standoff': 0.005,
-            'press_overtravel': 0.003,
-            'hold_duration': 0.5,
-            'control_rate': 10.0,
-            'translation_gain': 0.5,
-            'rotation_gain': 0.5,
-            'align_max_translation_step': 0.002,
-            'press_max_translation_step': 0.001,
-            'max_rotation_step': math.radians(2.0),
-            'position_tolerance': 0.003,
-            'press_position_tolerance': 0.0015,
-            'angular_tolerance': math.radians(3.0),
+            'coarse_correction_attempts': 3,
+            'distance_mm': 0.0,
+            'x_advance_axis_mode': 'base_x',
             'stable_sample_count': 3,
             'stable_position_spread': 0.003,
             'stable_angle_spread': math.radians(3.0),
-            'stable_cycle_count': 5,
             'target_acquire_timeout': 5.0,
-            'target_reacquire_timeout': 8.0,
-            'reacquire_max_normal_drift': 0.02,
             'target_pause_age': 0.5,
-            'target_abort_age': 2.0,
             'tcp_feedback_timeout': 0.5,
             'moveit_timeout': 20.0,
-            'pbvs_timeout': 10.0,
-            'press_timeout': 3.0,
-            'retract_timeout': 8.0,
-            'max_pbvs_displacement': 0.10,
-            'max_press_travel': 0.012,
-            'max_press_lateral_error': 0.004,
-            'tcp_offset_x': 0.0,
-            'tcp_offset_y': 0.0,
-            'tcp_offset_z': 0.1468,
             'moveit_position_tolerance': 0.002,
             'moveit_orientation_tolerance': 0.05,
             'panel_width': 0.6,
@@ -245,7 +209,7 @@ class PiperPbvsController(Node):
             'camera_size_y': 0.04,
             'camera_size_z': 0.04,
         }
-        self.pbvs_parameter_names = tuple(defaults)
+        self.controller_parameter_names = tuple(defaults)
         for name, value in defaults.items():
             self.declare_parameter(name, value)
 
@@ -253,12 +217,9 @@ class PiperPbvsController(Node):
         """Read parameters and reject unsafe combinations."""
         values = {
             name: self.get_parameter(name).value
-            for name in self.pbvs_parameter_names
+            for name in self.controller_parameter_names
         }
         self.enable_motion = bool(values['enable_motion'])
-        self.enable_press = bool(values['enable_press'])
-        if self.enable_press and not self.enable_motion:
-            raise ValueError('enable_press requires enable_motion=true')
 
         string_names = (
             'base_frame',
@@ -267,6 +228,7 @@ class PiperPbvsController(Node):
             'camera_link_frame',
             'move_group_name',
             'orientation_mode',
+            'x_advance_axis_mode',
         )
         for name in string_names:
             value = str(values[name]).strip()
@@ -280,8 +242,12 @@ class PiperPbvsController(Node):
             raise ValueError(
                 'orientation_mode must be preserve_current_roll or world_up'
             )
+        if self.x_advance_axis_mode not in ('base_x', 'panel_normal'):
+            raise ValueError(
+                'x_advance_axis_mode must be base_x or panel_normal'
+            )
 
-        integer_names = ('stable_sample_count', 'stable_cycle_count')
+        integer_names = ('stable_sample_count',)
         for name in integer_names:
             value = int(values[name])
             if value < 1:
@@ -294,12 +260,13 @@ class PiperPbvsController(Node):
         if self.coarse_correction_attempts < 0:
             raise ValueError('coarse_correction_attempts cannot be negative')
 
+        self.distance_m = x_distance_metres(values['distance_mm'])
+
         bool_names = ('camera_collision_enabled',)
         for name in bool_names:
             setattr(self, name, bool(values[name]))
 
-        offset_names = ('tcp_offset_x', 'tcp_offset_y', 'tcp_offset_z')
-        signed_float_names = offset_names + ('coarse_horizontal_offset',)
+        signed_float_names = ('coarse_horizontal_offset',)
         for name in signed_float_names:
             value = float(values[name])
             if not math.isfinite(value):
@@ -312,8 +279,8 @@ class PiperPbvsController(Node):
 
         excluded = set(string_names + integer_names + bool_names) | {
             'enable_motion',
-            'enable_press',
             'coarse_correction_attempts',
+            'distance_mm',
         } | set(signed_float_names)
         for name, value in values.items():
             if name in excluded:
@@ -323,21 +290,14 @@ class PiperPbvsController(Node):
                 raise ValueError(f'{name} must be positive')
             setattr(self, name, value)
 
-        if self.prepress_standoff >= self.coarse_standoff:
-            raise ValueError(
-                'prepress_standoff must be smaller than coarse_standoff'
-            )
         if (
-            self.prepress_standoff + self.press_overtravel
-            > self.max_press_travel
+            self.coarse_lateral_error_min
+            >= self.coarse_lateral_error_max
         ):
-            raise ValueError('configured press travel exceeds safety limit')
-        self.tcp_offset = np.array([
-            self.tcp_offset_x,
-            self.tcp_offset_y,
-            self.tcp_offset_z,
-        ])
-        self.control_period = 1.0 / self.control_rate
+            raise ValueError(
+                'coarse_lateral_error_min must be smaller than '
+                'coarse_lateral_error_max'
+            )
 
     @staticmethod
     def _pose_arrays(pose):
@@ -503,7 +463,7 @@ class PiperPbvsController(Node):
         label = self.STATE_LABELS.get(state, state)
         if state in ('IDLE', 'DONE', 'ABORT'):
             self.get_logger().info(
-                f'【PBVS状态】{label}（{state}）'
+                f'【粗定位状态】{label}（{state}）'
             )
         else:
             self.get_logger().info(
@@ -727,7 +687,7 @@ class PiperPbvsController(Node):
         if not self._wait_future(future, 3.0):
             raise TaskFailure('planning scene update timed out')
         if future.result() is None or not future.result().success:
-            raise TaskFailure('MoveIt rejected PBVS collision scene')
+            raise TaskFailure('MoveIt rejected coarse collision scene')
 
     def _moveit_goal(self, target_pose, plan_only):
         """Construct the coarse MoveGroup goal."""
@@ -769,8 +729,13 @@ class PiperPbvsController(Node):
         goal.planning_options.replan_delay = 1.0
         return goal
 
-    def _run_moveit(self, target_pose, goal_handle):
-        """Plan or execute the coarse pre-approach pose."""
+    def _run_moveit(
+        self,
+        target_pose,
+        goal_handle,
+        stage='coarse approach',
+    ):
+        """Plan or execute one guarded MoveIt target pose."""
         if not self.move_group_client.wait_for_server(timeout_sec=5.0):
             raise TaskFailure('/move_action unavailable')
         send_future = self.move_group_client.send_goal_async(
@@ -780,17 +745,17 @@ class PiperPbvsController(Node):
             raise TaskFailure('MoveIt goal submission timed out')
         move_goal = send_future.result()
         if move_goal is None or not move_goal.accepted:
-            raise TaskFailure('MoveIt rejected coarse approach')
+            raise TaskFailure(f'MoveIt rejected {stage}')
         self.active_move_goal = move_goal
         result_future = move_goal.get_result_async()
         deadline = time.monotonic() + self.moveit_timeout
         while not result_future.done():
             if goal_handle.is_cancel_requested:
                 move_goal.cancel_goal_async()
-                raise TaskCanceled('canceled during MoveIt approach')
+                raise TaskCanceled(f'canceled during MoveIt {stage}')
             if time.monotonic() >= deadline:
                 move_goal.cancel_goal_async()
-                raise TaskFailure('MoveIt coarse approach timed out')
+                raise TaskFailure(f'MoveIt {stage} timed out')
             self._feedback(goal_handle)
             time.sleep(0.05)
         self.active_move_goal = None
@@ -803,9 +768,111 @@ class PiperPbvsController(Node):
                 wrapped_result.result.error_code.val
                 if wrapped_result is not None else 'unknown'
             )
-            raise TaskFailure(f'MoveIt failed with error code {code}')
+            raise TaskFailure(
+                f'MoveIt {stage} failed with error code {code}'
+            )
         self.last_moveit_arm_target = self._final_moveit_arm_target(
             wrapped_result.result,
+        )
+
+    def _verify_target_pose(
+        self,
+        goal_handle,
+        target_position,
+        target_quaternion,
+        movement_label,
+    ):
+        """Require fresh measured TCP feedback at a generic MoveIt target."""
+        deadline = time.monotonic() + 3.0
+        last_position_error = math.inf
+        last_angular_error = math.inf
+        while time.monotonic() < deadline:
+            self._guard(goal_handle)
+            try:
+                current_position, current_quaternion = (
+                    self._latest_tcp_arrays()
+                )
+            except TaskFailure:
+                time.sleep(0.05)
+                continue
+            _, _, position_error, angular_error = pose_error(
+                target_position,
+                target_quaternion,
+                current_position,
+                current_quaternion,
+            )
+            last_position_error = position_error
+            last_angular_error = angular_error
+            self._feedback(goal_handle, position_error, angular_error)
+            if (
+                position_error <= self.X_POSITION_TOLERANCE
+                and angular_error <= self.X_ORIENTATION_TOLERANCE
+            ):
+                return current_position, current_quaternion
+            time.sleep(0.05)
+        raise TaskFailure(
+            f'{movement_label} did not reach its measured target; '
+            f'position_error={last_position_error * 1000.0:.2f} mm, '
+            f'angular_error={last_angular_error:.6f} rad'
+        )
+
+    def _run_x_advance(
+        self,
+        goal_handle,
+        measured_position,
+        measured_quaternion,
+        press_quaternion,
+    ):
+        """Move from measured coarse T0 along the configured advance axis."""
+        self._set_state('X_ADVANCE')
+        if self.x_advance_axis_mode == 'panel_normal':
+            target_position = offset_along_press_axis(
+                measured_position,
+                press_quaternion,
+                self.distance_m,
+            )
+            axis_label = '视觉锁定的面板按压轴'
+            movement_label = 'panel-normal movement'
+        else:
+            target_position = translated_base_x(
+                measured_position,
+                self.distance_m,
+            )
+            axis_label = 'base_link X'
+            movement_label = 'base-link X movement'
+        target_pose = self._pose_message(
+            target_position,
+            measured_quaternion,
+        )
+        self.desired_tcp_pub.publish(target_pose)
+        self.get_logger().info(
+            f'【按压移动】模式={self.x_advance_axis_mode}，'
+            f'从粗定位实测 T0 沿 {axis_label} '
+            f'移动 {self.distance_m * 1000.0:+.3f} mm，目标='
+            + self._format_xyz(target_position)
+        )
+        self._run_moveit(
+            target_pose,
+            goal_handle,
+            stage=movement_label,
+        )
+        reached_position, reached_quaternion = self._verify_target_pose(
+            goal_handle,
+            target_position,
+            measured_quaternion,
+            movement_label,
+        )
+        _, _, position_error, angular_error = pose_error(
+            target_position,
+            measured_quaternion,
+            reached_position,
+            reached_quaternion,
+        )
+        self._stage_success(
+            'X_ADVANCE',
+            f'{axis_label}移动完成，位置误差='
+            f'{position_error * 1000.0:.2f} mm，'
+            f'姿态误差={angular_error:.6f} rad',
         )
 
     def _latest_tcp_arrays(self):
@@ -884,7 +951,9 @@ class PiperPbvsController(Node):
                 prefix + '横向误差向量='
                 + self._format_xyz(lateral_vector)
                 + f', 模长={lateral_error:.6f} m, '
-                + f'允许≤{self.coarse_lateral_tolerance:.4f} m'
+                + '允许范围=['
+                + f'{self.coarse_lateral_error_min:.4f}, '
+                + f'{self.coarse_lateral_error_max:.4f}] m'
             )
 
         target_joints = self.last_moveit_arm_target
@@ -971,14 +1040,17 @@ class PiperPbvsController(Node):
                 position_error,
                 angular_error,
             )
-            if (
-                abs(axial_error) <= self.coarse_axial_tolerance
-                and lateral_error <= self.coarse_lateral_tolerance
-                and angular_error <= 1.5 * self.moveit_orientation_tolerance
+            if coarse_pose_is_acceptable(
+                axial_error,
+                lateral_error,
+                angular_error,
+                self.coarse_axial_tolerance,
+                self.coarse_lateral_error_min,
+                self.coarse_lateral_error_max,
+                1.5 * self.moveit_orientation_tolerance,
             ):
-                # MoveIt accepts a region around the requested pose. Capture
-                # the pose actually reached so guarded retract never chases an
-                # approximate, potentially unreachable planning target.
+                # MoveIt accepts a region around the requested pose. Return
+                # the pose actually reached for final diagnostics.
                 return current_position, current_quaternion
             time.sleep(0.05)
         self._log_coarse_verification_failure(
@@ -997,43 +1069,6 @@ class PiperPbvsController(Node):
         )
         return None
 
-    def _latest_target_arrays(self):
-        """Return the latest target pose arrays and receive age."""
-        with self.data_lock:
-            message = copy.deepcopy(self.latest_target)
-            received = self.latest_target_received
-        if message is None:
-            return None, None, math.inf
-        position, quaternion = self._pose_arrays(message.pose)
-        return position, quaternion, time.monotonic() - received
-
-    def _publish_command(self, tcp_position, tcp_quaternion):
-        """Convert a TCP target to J6 and publish a guarded PosCmd."""
-        flange_position, flange_quaternion = tcp_to_flange_pose(
-            tcp_position,
-            tcp_quaternion,
-            self.tcp_offset,
-        )
-        flange_pose = self._pose_message(
-            flange_position,
-            flange_quaternion,
-        )
-        self.commanded_flange_pub.publish(flange_pose)
-        if not self.enable_motion:
-            return
-        euler = quaternion_to_euler_xyz(flange_quaternion)
-        command = PosCmd()
-        command.x = float(flange_position[0])
-        command.y = float(flange_position[1])
-        command.z = float(flange_position[2])
-        command.roll = float(euler[0])
-        command.pitch = float(euler[1])
-        command.yaw = float(euler[2])
-        command.gripper = 0.0
-        command.mode1 = 0
-        command.mode2 = 0
-        self.pos_command_pub.publish(command)
-
     def _control_quaternion(
         self,
         detected_quaternion,
@@ -1048,239 +1083,6 @@ class PiperPbvsController(Node):
             press_axis,
         )
 
-    def _align_dynamic_target(
-        self,
-        goal_handle,
-        alignment_start_position,
-        press_quaternion,
-        fixed_tcp_quaternion,
-    ):
-        """PBVS-align position while holding the reached coarse attitude."""
-        deadline = time.monotonic() + self.pbvs_timeout
-        stable_cycles = 0
-        while time.monotonic() < deadline:
-            self._guard(goal_handle)
-            target_position, _, target_age = (
-                self._latest_target_arrays()
-            )
-            if target_age > self.target_abort_age:
-                raise TaskFailure(
-                    'button target lost during PBVS; check RGB detection, '
-                    'camera TF, and synchronized camera frames'
-                )
-            if target_age > self.target_pause_age:
-                self._feedback(goal_handle)
-                time.sleep(self.control_period)
-                continue
-            desired_position = offset_along_press_axis(
-                target_position,
-                press_quaternion,
-                -self.prepress_standoff,
-            )
-            if np.linalg.norm(
-                desired_position - alignment_start_position
-            ) > self.max_pbvs_displacement:
-                raise TaskFailure('PBVS target exceeds displacement limit')
-            desired_pose = self._pose_message(
-                desired_position,
-                fixed_tcp_quaternion,
-            )
-            self.desired_tcp_pub.publish(desired_pose)
-
-            current_position, current_quaternion = (
-                self._latest_tcp_arrays()
-            )
-            _, _, position_error, angular_error = pose_error(
-                desired_position,
-                fixed_tcp_quaternion,
-                current_position,
-                current_quaternion,
-            )
-            self._feedback(
-                goal_handle,
-                position_error,
-                angular_error,
-            )
-            if (
-                position_error <= self.position_tolerance
-                and angular_error <= self.angular_tolerance
-            ):
-                stable_cycles += 1
-                if stable_cycles >= self.stable_cycle_count:
-                    return target_position, fixed_tcp_quaternion
-            else:
-                stable_cycles = 0
-
-            next_position, next_quaternion = limited_pose_step(
-                current_position,
-                current_quaternion,
-                desired_position,
-                fixed_tcp_quaternion,
-                self.translation_gain,
-                self.rotation_gain,
-                self.align_max_translation_step,
-                self.max_rotation_step,
-            )
-            self._publish_command(next_position, next_quaternion)
-            time.sleep(self.control_period)
-        raise TaskFailure('PBVS alignment timed out')
-
-    def _servo_static(
-        self,
-        goal_handle,
-        target_position,
-        target_quaternion,
-        timeout,
-        max_translation_step,
-        position_tolerance,
-        ignore_cancel=False,
-    ):
-        """Servo to a frozen target pose with bounded absolute commands."""
-        deadline = time.monotonic() + timeout
-        stable_cycles = 0
-        while time.monotonic() < deadline:
-            self._guard(goal_handle, ignore_cancel=ignore_cancel)
-            current_position, current_quaternion = (
-                self._latest_tcp_arrays()
-            )
-            _, _, position_error, angular_error = pose_error(
-                target_position,
-                target_quaternion,
-                current_position,
-                current_quaternion,
-            )
-            self._feedback(
-                goal_handle,
-                position_error,
-                angular_error,
-            )
-            if (
-                position_error <= position_tolerance
-                and angular_error <= self.angular_tolerance
-            ):
-                stable_cycles += 1
-                if stable_cycles >= self.stable_cycle_count:
-                    return
-            else:
-                stable_cycles = 0
-            next_position, next_quaternion = limited_pose_step(
-                current_position,
-                current_quaternion,
-                target_position,
-                target_quaternion,
-                self.translation_gain,
-                self.rotation_gain,
-                max_translation_step,
-                self.max_rotation_step,
-            )
-            self._publish_command(next_position, next_quaternion)
-            time.sleep(self.control_period)
-        raise TaskFailure(f'{self.current_state} servo timed out')
-
-    def _press(
-        self,
-        goal_handle,
-        contact_position,
-        contact_quaternion,
-    ):
-        """Perform a displacement-limited press using a frozen target."""
-        start_position, _ = self._latest_tcp_arrays()
-        press_axis = quaternion_to_matrix(contact_quaternion)[:, 2]
-        press_target = offset_along_press_axis(
-            contact_position,
-            contact_quaternion,
-            self.press_overtravel,
-        )
-        deadline = time.monotonic() + self.press_timeout
-        stable_cycles = 0
-        while time.monotonic() < deadline:
-            self._guard(goal_handle)
-            current_position, current_quaternion = (
-                self._latest_tcp_arrays()
-            )
-            displacement = current_position - start_position
-            axial_travel = float(np.dot(displacement, press_axis))
-            lateral = displacement - axial_travel * press_axis
-            if axial_travel > self.max_press_travel:
-                raise TaskFailure('press axial travel limit exceeded')
-            if np.linalg.norm(lateral) > self.max_press_lateral_error:
-                raise TaskFailure('press lateral motion limit exceeded')
-
-            _, _, position_error, angular_error = pose_error(
-                press_target,
-                contact_quaternion,
-                current_position,
-                current_quaternion,
-            )
-            self._feedback(
-                goal_handle,
-                position_error,
-                angular_error,
-            )
-            if (
-                position_error <= self.press_position_tolerance
-                and angular_error <= self.angular_tolerance
-            ):
-                stable_cycles += 1
-                if stable_cycles >= self.stable_cycle_count:
-                    return
-            else:
-                stable_cycles = 0
-            next_position, next_quaternion = limited_pose_step(
-                current_position,
-                current_quaternion,
-                press_target,
-                contact_quaternion,
-                self.translation_gain,
-                self.rotation_gain,
-                self.press_max_translation_step,
-                self.max_rotation_step,
-            )
-            self._publish_command(next_position, next_quaternion)
-            time.sleep(self.control_period)
-        raise TaskFailure('press motion timed out')
-
-    def _hold(self, goal_handle):
-        """Hold the pressed pose while monitoring cancellation and faults."""
-        deadline = time.monotonic() + self.hold_duration
-        while time.monotonic() < deadline:
-            self._guard(goal_handle)
-            self._feedback(goal_handle)
-            time.sleep(min(0.05, self.hold_duration))
-
-    def _attempt_retract(
-        self,
-        goal_handle,
-        safe_position,
-        safe_quaternion,
-        ignore_cancel=False,
-    ):
-        """Try to return to the measured PBVS-entry pose."""
-        if self._arm_fault():
-            self.get_logger().error(
-                'Skipping automatic retract because hardware reports a fault'
-            )
-            return False
-        try:
-            self._set_state('RETRACT')
-            self._servo_static(
-                goal_handle,
-                safe_position,
-                safe_quaternion,
-                self.retract_timeout,
-                self.align_max_translation_step,
-                self.position_tolerance,
-                ignore_cancel=ignore_cancel,
-            )
-            self._stage_success(
-                'RETRACT',
-                '机械臂已回到 PBVS 开始前的实测安全位姿',
-            )
-            return True
-        except (TaskFailure, TaskCanceled) as error:
-            self._stage_failure('RETRACT', error)
-            return False
-
     def _result(self, success, message):
         """Construct a PressButton result."""
         result = PressButton.Result()
@@ -1289,18 +1091,13 @@ class PiperPbvsController(Node):
         return result
 
     def _execute_press(self, goal_handle):
-        """Execute one complete guarded button task."""
+        """Acquire one button target and complete MoveIt coarse positioning."""
         with self.active_lock:
             if self.task_active:
                 goal_handle.abort()
                 return self._result(False, 'another press task is active')
             self.task_active = True
 
-        coarse_position = None
-        coarse_quaternion = None
-        safe_retract_position = None
-        safe_retract_quaternion = None
-        entered_direct_control = False
         try:
             self.last_moveit_arm_target = None
             target_name = goal_handle.request.target_name.strip()
@@ -1321,13 +1118,13 @@ class PiperPbvsController(Node):
                 button_quaternion,
                 roll_reference_quaternion,
             )
-            coarse_position = offset_along_press_axis(
+            uncompensated_coarse_position = offset_along_press_axis(
                 button_position,
                 control_quaternion,
                 -self.coarse_standoff,
             )
             coarse_position = offset_along_panel_horizontal(
-                coarse_position,
+                uncompensated_coarse_position,
                 button_quaternion,
                 self.coarse_horizontal_offset,
             )
@@ -1351,9 +1148,9 @@ class PiperPbvsController(Node):
             )
 
             self._set_state('COARSE_APPROACH')
-            total_coarse_attempts = (
-                1 + self.coarse_correction_attempts
-                if self.enable_motion else 1
+            total_coarse_attempts = coarse_total_attempts(
+                self.enable_motion,
+                self.coarse_correction_attempts,
             )
             verified_pose = None
             successful_attempt = 0
@@ -1361,8 +1158,9 @@ class PiperPbvsController(Node):
                 attempt_number = attempt_index + 1
                 if attempt_number > 1:
                     self.get_logger().warning(
-                        '【粗定位校正】首次实测超差，使用同一 '
-                        'C0 执行一次二次 MoveIt 校正'
+                        '【粗定位校正】上一次实测超差，继续使用同一 '
+                        f'C0 执行第 {attempt_number}/{total_coarse_attempts} '
+                        '次 MoveIt'
                     )
                 self._run_moveit(coarse_pose, goal_handle)
                 if not self.enable_motion:
@@ -1372,6 +1170,12 @@ class PiperPbvsController(Node):
                         '未发送运动命令',
                     )
                     self._set_state('DONE')
+                    if self.distance_m != 0.0:
+                        self.get_logger().warning(
+                            '已配置 distance_mm='
+                            f'{self.distance_m * 1000.0:+.3f}，但当前为 '
+                            'dry-run，跳过按压轴实机移动'
+                        )
                     goal_handle.succeed()
                     return self._result(
                         True,
@@ -1396,198 +1200,105 @@ class PiperPbvsController(Node):
                     'after MoveIt correction'
                 )
 
+            measured_position, _ = verified_pose
             (
-                safe_retract_position,
-                safe_retract_quaternion,
-            ) = verified_pose
+                axial_distance,
+                axial_error,
+                lateral_vector,
+                lateral_error,
+            ) = coarse_standoff_errors(
+                button_position,
+                measured_position,
+                coarse_quaternion,
+                self.coarse_standoff,
+            )
             self._stage_success(
                 'COARSE_APPROACH',
-                'MoveIt 返回成功，实测 TCP 已进入按钮局部'
-                f'坐标粗定位容差（第 {successful_attempt} 次）',
+                'MoveIt 返回成功，实测 TCP 已进入粗定位验收范围'
+                f'（第 {successful_attempt}/{total_coarse_attempts} 次）',
             )
             self.get_logger().info(
                 '【定位诊断】首次按钮位置 B0='
                 + self._format_xyz(button_position)
             )
             self.get_logger().info(
-                '【定位诊断】MoveIt 粗定位目标 C0='
+                '【定位诊断】未补偿粗定位目标 C0_raw='
+                + self._format_xyz(uncompensated_coarse_position)
+            )
+            self.get_logger().info(
+                '【定位诊断】补偿后 MoveIt 粗定位目标 C0='
                 + self._format_xyz(coarse_position)
+            )
+            self._log_position_delta(
+                '粗定位目标补偿 C0-C0_raw',
+                coarse_position,
+                uncompensated_coarse_position,
             )
             self.get_logger().info(
                 '【定位诊断】真机到达位置 T0='
-                + self._format_xyz(safe_retract_position)
+                + self._format_xyz(measured_position)
             )
             self._log_position_delta(
                 'MoveIt执行误差 T0-C0',
-                safe_retract_position,
+                measured_position,
                 coarse_position,
             )
-            entered_direct_control = True
-
-            # Samples collected before the eye-in-hand camera moved are
-            # obsolete. Require a newly stable panel pose at the coarse view
-            # before direct Cartesian control can publish a command.
-            self._set_state('REACQUIRE_TARGET')
-            self._clear_target_tracking()
-            (
-                reacquired_button_position,
-                _,
-            ) = self._wait_for_stable_target(
-                goal_handle,
-                timeout=self.target_reacquire_timeout,
-                timeout_message=(
-                    'stable button pose reacquisition timed out at '
-                    'the coarse viewpoint'
-                ),
-            )
-            normal_drift = signed_normal_drift(
-                button_position,
-                reacquired_button_position,
-                coarse_quaternion,
+            horizontal_axis = quaternion_to_matrix(button_quaternion)[:, 0]
+            measured_horizontal_offset = float(np.dot(
+                measured_position - uncompensated_coarse_position,
+                horizontal_axis,
+            ))
+            self.get_logger().info(
+                '【定位诊断】实测相对未补偿目标水平位移='
+                f'{measured_horizontal_offset * 1000.0:+.2f} mm '
+                '（正值向左，负值向右）'
             )
             self.get_logger().info(
-                '【定位诊断】B1-B0法向漂移='
-                f'{normal_drift:+.4f} m, '
-                f'允许≤{self.reacquire_max_normal_drift:.4f} m'
-            )
-            if abs(normal_drift) > self.reacquire_max_normal_drift:
-                raise TaskFailure(
-                    'reacquired button pose exceeds normal drift limit'
-                )
-
-            # The panel normal was locked before MoveIt moved the camera.
-            # Hold the attitude actually reached at T0 during direct servo;
-            # only the RGB ray/plane intersection may update position.
-            reacquired_control_quaternion = coarse_quaternion
-            reacquired_coarse_position = offset_along_press_axis(
-                reacquired_button_position,
-                reacquired_control_quaternion,
-                -self.coarse_standoff,
-            )
-            reacquired_prepress_position = offset_along_press_axis(
-                reacquired_button_position,
-                reacquired_control_quaternion,
-                -self.prepress_standoff,
-            )
-            self._stage_success(
-                'REACQUIRE_TARGET',
-                '已在新的相机视角重新取得稳定按钮位姿',
+                '【定位诊断】B0-T0法向距离='
+                f'{axial_distance:.6f} m, '
+                f'法向误差={axial_error:+.6f} m'
             )
             self.get_logger().info(
-                '【定位诊断】二次按钮位置 B1='
-                + self._format_xyz(reacquired_button_position)
+                '【定位诊断】B0-T0横向误差向量='
+                + self._format_xyz(lateral_vector)
+                + f', 模长={lateral_error:.6f} m, '
+                + '允许范围=['
+                + f'{self.coarse_lateral_error_min:.4f}, '
+                + f'{self.coarse_lateral_error_max:.4f}] m'
             )
-            self._log_position_delta(
-                '视觉位置漂移 B1-B0',
-                reacquired_button_position,
-                button_position,
-            )
-            self.get_logger().info(
-                '【定位诊断】二次视觉对应粗定位点 C1='
-                + self._format_xyz(reacquired_coarse_position)
-            )
-            self._log_position_delta(
-                '新粗定位偏差 C1-T0',
-                reacquired_coarse_position,
-                safe_retract_position,
-            )
-            self.get_logger().info(
-                '【定位诊断】二次视觉对应预按压点 D1='
-                + self._format_xyz(reacquired_prepress_position)
-            )
-            self._log_position_delta(
-                'PBVS所需位移 D1-T0',
-                reacquired_prepress_position,
-                safe_retract_position,
-            )
-
-            self._set_state('PBVS_ALIGN')
-            contact_position, contact_quaternion = (
-                self._align_dynamic_target(
+            if self.distance_m != 0.0:
+                measured_position, measured_quaternion = verified_pose
+                self._run_x_advance(
                     goal_handle,
-                    safe_retract_position,
+                    measured_position,
+                    measured_quaternion,
                     coarse_quaternion,
-                    safe_retract_quaternion,
                 )
-            )
-            self._stage_success(
-                'PBVS_ALIGN',
-                '末端位置和姿态已连续稳定在对准容差内',
-            )
-            if not self.enable_press:
-                if not self._attempt_retract(
-                    goal_handle,
-                    safe_retract_position,
-                    safe_retract_quaternion,
-                ):
-                    raise TaskFailure('alignment completed but retract failed')
-                self._set_state('DONE')
-                goal_handle.succeed()
-                return self._result(
-                    True,
-                    'PBVS 对准成功；按压功能未启用，已安全回撤',
-                )
-
-            self._set_state('PRESS')
-            self._press(
-                goal_handle,
-                contact_position,
-                contact_quaternion,
-            )
-            self._stage_success(
-                'PRESS',
-                '已在位移和横向偏差限制内完成按压',
-            )
-            self._set_state('HOLD')
-            self._hold(goal_handle)
-            self._stage_success(
-                'HOLD',
-                '按压保持时间已完成',
-            )
-            if not self._attempt_retract(
-                goal_handle,
-                safe_retract_position,
-                safe_retract_quaternion,
-            ):
-                raise TaskFailure('button pressed but retract failed')
             self._set_state('DONE')
             goal_handle.succeed()
-            return self._result(True, '按钮按压和安全回撤全部完成')
+            if self.distance_m != 0.0:
+                return self._result(
+                    True,
+                    'MoveIt 初定位及按压轴移动完成'
+                    f'（{self.x_advance_axis_mode}）',
+                )
+            return self._result(
+                True,
+                'MoveIt 初定位完成；机械臂保持在实测 T0，未执行 PBVS',
+            )
 
         except TaskCanceled as error:
             failed_state = self.current_state
             self._stage_failure(failed_state, f'任务被取消：{error}')
-            retract_ok = True
-            if entered_direct_control and safe_retract_position is not None:
-                retract_ok = self._attempt_retract(
-                    goal_handle,
-                    safe_retract_position,
-                    safe_retract_quaternion,
-                    ignore_cancel=True,
-                )
             self._set_state('ABORT')
             goal_handle.canceled()
-            message = str(error)
-            if not retract_ok:
-                message += '；安全回撤也失败'
-            return self._result(False, message)
+            return self._result(False, str(error))
         except Exception as error:
             failed_state = self.current_state
             self._stage_failure(failed_state, error)
-            retract_ok = True
-            if entered_direct_control and safe_retract_position is not None:
-                retract_ok = self._attempt_retract(
-                    goal_handle,
-                    safe_retract_position,
-                    safe_retract_quaternion,
-                    ignore_cancel=True,
-                )
             self._set_state('ABORT')
             goal_handle.abort()
-            message = str(error)
-            if not retract_ok:
-                message += '；安全回撤也失败'
-            return self._result(False, message)
+            return self._result(False, str(error))
         finally:
             self.active_move_goal = None
             with self.active_lock:
@@ -1602,7 +1313,7 @@ class PiperPbvsController(Node):
 
 
 def main(args=None):
-    """Run the PBVS controller with concurrent action and topic callbacks."""
+    """Run the coarse controller with concurrent action and callbacks."""
     rclpy.init(args=args)
     node = PiperPbvsController()
     executor = MultiThreadedExecutor(num_threads=4)

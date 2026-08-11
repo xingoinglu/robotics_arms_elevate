@@ -75,52 +75,9 @@ ros2 launch piper_with_gripper_moveit demo.launch.py
 
 调整好位置后点击左侧MotionPlanning中Planning的Plan&Execute即可开始规划并运动
 
-## 4 moveit控制仿真机械臂
+## 4 可能遇见的问题
 
-### 4.1 gazebo
-
-#### 4.1.1 运行gazebo
-
-见 [piper_gazebo](../piper_sim/README.md#1-gazebo仿真)
-
-#### 5.1.2 moveit控制
-
-```bash
-cd ~/piper_ros
-source install/setup.bash
-```
-
-注: **下面的launch不是控制真实机械臂的demo.launch.py,且需要在gazebo之后运行,否则会没有机械臂模型**
-
-当前工作区仅保留有夹爪配置：
-
-```bash
-ros2 launch piper_with_gripper_moveit piper_moveit.launch.py
-```
-
-### 5.2 mujoco
-
-#### 5.2.1 moveit控制（先运行moveit）
-
-同 [3.2 moveit2控制](#32-moveit2控制)
-
-#### 5.2.2 运行mujoco
-
-见 [piper_mujoco](../piper_sim/README.md#2-mujoco仿真)
-
-注：**关闭可以使用ctrl+C+\\**
-
-## 5 可能遇见的问题
-
-### 5.1 打开gazebo时报错，提示urdf未加载，导致仿真环境中机械臂末端与底座穿模
-
-1 注意编译后的install下piper_description中是否有config，且config中是否包含src/piper/piper_description中config的文件
-
-install中缺少urdf同理
-
-2 注意src/piper/piper_description/urdf/piper_description_gazebo.xacro中644行的路径是否正确，如确认后问题依然存在，将路径改为绝对路径
-
-### 5.2 运行demo.launch.py时报错
+### 4.1 运行demo.launch.py时报错
 
 报错：参数需要一个double，而提供的是一个string
 解决办法：

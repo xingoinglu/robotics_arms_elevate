@@ -332,12 +332,11 @@ int32 mode1
 int32 mode2
 ```
 
-## MoveIt Planner and Simulation Environment
+## MoveIt Planner
 
 | Description | Documentation |
 |---|---|
 | MoveIt | [MoveIt README](src/piper_moveit/README(EN).md) |
-| Simulation | [Simulation README](src/piper_sim/README(EN).md) |
 
 ## Q&A
 

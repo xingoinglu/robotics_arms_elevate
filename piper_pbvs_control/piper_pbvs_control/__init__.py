@@ -1,1 +1,1 @@
-"""Piper MoveIt and PBVS elevator-button control."""
+"""Piper vision-guided MoveIt elevator-button positioning."""

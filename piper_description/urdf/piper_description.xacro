@@ -534,15 +534,6 @@
   <xacro:transmission_block tran_name="tran5" joint_name="joint5" motor_name="motor5"/>
   <xacro:transmission_block tran_name="tran6" joint_name="joint6" motor_name="motor6"/>
   <xacro:transmission_block tran_name="tran7" joint_name="joint7" motor_name="motor7"/>
-<!-- gazebo -->
-  <gazebo>
-    <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
-        <robotNamespace>/piper</robotNamespace>
-        <parameters> $(find piper_gazebo)/config/ros2_controllers.yaml </parameters>
-        <legacyModeNS>true</legacyModeNS>
-    </plugin>
-  </gazebo>
- 
   <!-- <gazebo reference="base_link">
     <material>Gazebo/Black</material>
   </gazebo>

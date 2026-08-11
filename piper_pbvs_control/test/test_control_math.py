@@ -1,4 +1,4 @@
-"""Unit tests for PBVS pose mathematics."""
+"""Unit tests for MoveIt coarse-positioning pose mathematics."""
 
 import math
 
@@ -7,18 +7,43 @@ import numpy as np
 from piper_pbvs_control.control_math import (
     align_tool_z_preserve_roll,
     average_stable_poses,
+    coarse_lateral_error_in_range,
+    coarse_pose_is_acceptable,
     coarse_standoff_errors,
-    limited_pose_step,
+    coarse_total_attempts,
     matrix_to_quaternion,
     offset_along_panel_horizontal,
     offset_along_press_axis,
-    pose_error,
-    quaternion_to_euler_xyz,
     quaternion_to_matrix,
     rotation_vector,
-    signed_normal_drift,
-    tcp_to_flange_pose,
+    translated_base_x,
+    x_distance_metres,
 )
+
+
+def test_x_distance_converts_signed_millimetres_to_metres():
+    """Post-coarse X distance keeps its sign and uses millimetres."""
+    assert np.isclose(x_distance_metres(80.0), 0.08)
+    assert np.isclose(x_distance_metres(-25.0), -0.025)
+    assert x_distance_metres(0.0) == 0.0
+
+
+def test_x_distance_rejects_non_finite_and_out_of_range_values():
+    """Post-coarse X requests use the same guarded 100 mm range."""
+    for value in (100.001, -100.001, math.inf, -math.inf, math.nan):
+        with np.testing.assert_raises(ValueError):
+            x_distance_metres(value)
+
+
+def test_translated_base_x_only_changes_the_first_coordinate():
+    """The optional displacement is expressed in base_link, not tool Z."""
+    start = np.array([0.38, -0.02, 0.54])
+
+    assert np.allclose(
+        translated_base_x(start, 0.08),
+        [0.46, -0.02, 0.54],
+    )
+    assert np.allclose(start, [0.38, -0.02, 0.54])
 
 
 def test_align_tool_z_keeps_pose_when_axis_is_already_aligned():
@@ -104,19 +129,6 @@ def test_align_tool_z_rejects_invalid_target_axis():
         )
 
 
-def test_tcp_to_flange_removes_local_tool_offset():
-    """A TCP target must be converted to the SDK's J6 pose."""
-    quaternion = np.array([0.0, 0.0, 0.0, 1.0])
-    position, result_quaternion = tcp_to_flange_pose(
-        [0.4, 0.1, 0.3],
-        quaternion,
-        [0.0, 0.0, 0.1358],
-    )
-
-    assert np.allclose(position, [0.4, 0.1, 0.1642])
-    assert np.allclose(result_quaternion, quaternion)
-
-
 def test_offset_uses_tool_positive_z_press_axis():
     """Negative standoff must move away from the panel along tool Z."""
     result = offset_along_press_axis(
@@ -187,49 +199,36 @@ def test_coarse_axial_error_reports_distance_from_requested_standoff():
     assert np.isclose(lateral_error, 0.0)
 
 
-def test_signed_normal_drift_ignores_panel_lateral_motion():
-    """The B1 guard must only reject changes along the panel normal."""
-    quaternion = matrix_to_quaternion(np.array([
-        [0.0, 0.0, 1.0],
-        [0.0, 1.0, 0.0],
-        [-1.0, 0.0, 0.0],
-    ]))
+def test_coarse_lateral_error_range_is_closed():
+    """The configured 25-35 mm lateral band includes both boundaries."""
+    assert coarse_lateral_error_in_range(0.025, 0.025, 0.035)
+    assert coarse_lateral_error_in_range(0.030, 0.025, 0.035)
+    assert coarse_lateral_error_in_range(0.035, 0.025, 0.035)
 
-    drift = signed_normal_drift(
-        [0.4, 0.0, 0.2],
-        [0.43, 0.05, 0.18],
-        quaternion,
+
+def test_coarse_lateral_error_range_rejects_values_outside_band():
+    """Values just outside the lateral band must trigger correction."""
+    assert not coarse_lateral_error_in_range(0.0249, 0.025, 0.035)
+    assert not coarse_lateral_error_in_range(0.0351, 0.025, 0.035)
+
+
+def test_coarse_acceptance_keeps_axial_and_angular_guards():
+    """A valid lateral error cannot bypass axial or angular protection."""
+    assert coarse_pose_is_acceptable(
+        0.009, 0.030, 0.010, 0.010, 0.025, 0.035, 0.075
+    )
+    assert not coarse_pose_is_acceptable(
+        0.011, 0.030, 0.010, 0.010, 0.025, 0.035, 0.075
+    )
+    assert not coarse_pose_is_acceptable(
+        0.009, 0.030, 0.080, 0.010, 0.025, 0.035, 0.075
     )
 
-    assert np.isclose(drift, 0.03)
 
-
-def test_pose_step_enforces_translation_and_rotation_limits():
-    """PBVS proportional steps must never exceed configured maxima."""
-    target_quaternion = matrix_to_quaternion(np.array([
-        [0.0, -1.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ]))
-    position, quaternion = limited_pose_step(
-        [0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-        [1.0, 0.0, 0.0],
-        target_quaternion,
-        1.0,
-        1.0,
-        0.002,
-        math.radians(2.0),
-    )
-    _, _, translation_error, angular_error = pose_error(
-        position,
-        quaternion,
-        [0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0],
-    )
-
-    assert translation_error <= 0.002 + 1e-12
-    assert angular_error <= math.radians(2.0) + 1e-12
+def test_coarse_attempt_count_is_four_only_for_physical_motion():
+    """Three corrections mean four physical attempts and one dry-run plan."""
+    assert coarse_total_attempts(True, 3) == 4
+    assert coarse_total_attempts(False, 3) == 1
 
 
 def test_pose_stability_handles_quaternion_sign():
@@ -245,15 +244,3 @@ def test_pose_stability_handles_quaternion_sign():
     position, quaternion = result
     assert np.allclose(position, [0.4005, 0.1, 0.3])
     assert np.allclose(quaternion_to_matrix(quaternion), np.eye(3))
-
-
-def test_quaternion_to_euler_xyz_round_trip_axes():
-    """Euler conversion must match Piper's XYZ feedback convention."""
-    rotation = np.array([
-        [0.0, -1.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
-    euler = quaternion_to_euler_xyz(matrix_to_quaternion(rotation))
-
-    assert np.allclose(euler, [0.0, 0.0, math.pi / 2.0])

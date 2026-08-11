@@ -193,7 +193,7 @@ class Yolo11RgbdNode(Node):
         )
         self.declare_parameter(
             'bg_removal',
-            True,
+            False,
             ParameterDescriptor(
                 description='Replace invalid/far RGB pixels before inference',
             ),

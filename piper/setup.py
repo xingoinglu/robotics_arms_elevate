@@ -30,6 +30,7 @@ setup(
             'piper_single_ctrl = piper.piper_ctrl_single_node:main',
             'piper_trajectory_controller = '
             'piper.piper_trajectory_controller:main',
+            'piper_move_x = piper.piper_move_x:main',
             'piper_ms_ctrl = piper.piper_start_ms_node:main',
             'piper_read_master = piper.piper_read_master_node:main',
         ],

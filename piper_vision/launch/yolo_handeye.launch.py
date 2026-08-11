@@ -56,7 +56,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('conf_threshold', default_value='0.7'),
         DeclareLaunchArgument('iou_threshold', default_value='0.45'),
-        DeclareLaunchArgument('bg_removal', default_value='true'),
+        DeclareLaunchArgument('bg_removal', default_value='false'),
         DeclareLaunchArgument('target_frame_id', default_value='base_link'),
         DeclareLaunchArgument('camera_frame_id', default_value=''),
         DeclareLaunchArgument(

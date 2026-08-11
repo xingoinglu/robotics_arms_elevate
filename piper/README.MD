@@ -178,6 +178,49 @@ ros2 launch piper start_single_piper_rviz.launch.py
 mimic 关节，无需发布第二份状态。关节命令必须使用
 `/joint_ctrl_single`，禁止把它重映射回 `/joint_states`。
 
+#### 2.2.2 沿 base_link X 轴相对移动
+
+`piper_move_x` 从当前 `/tcp_pose` 出发，只改变 `base_link` 坐标系的 X，
+保持 Y/Z、末端姿态和夹爪开度。`distance_mm` 使用毫米，正值沿 `+X`，
+负值沿 `-X`，允许范围为 `-100`～`100 mm`，默认 `0 mm` 不产生动作。
+`motion_algorithm` 用于选择运动后端：
+
+- `cartesian`（默认）：以 `10 Hz`、每步不超过 `2 mm` 向 `/pos_cmd`
+  发布笛卡尔插值点，不经过碰撞规划。
+- `moveit`：向 `/move_action` 提交最终 TCP 位姿，由 MoveIt 进行碰撞规划；
+  只保证到达终点，不保证中间路径严格沿 X 直线。
+
+该节点不会启动或使能驱动。`cartesian` 模式只启动 `piper_single_ctrl`，
+并停止 PBVS、MoveIt 轨迹执行器等其他命令发布者。先使用默认的预览模式
+检查目标：
+
+```shell
+ros2 run piper piper_move_x --ros-args -p distance_mm:=50.0
+```
+
+确认机械臂路径无障碍并准备好物理急停后，显式允许真机运动：
+
+```shell
+ros2 run piper piper_move_x --ros-args \
+  -p motion_algorithm:=cartesian \
+  -p distance_mm:=50.0 \
+  -p enable_motion:=true
+```
+
+`moveit` 模式要求启动 MoveIt 和 `piper_trajectory_controller`、关闭 PBVS，
+并在真机执行前完成 `/initialize_arm`。使用 `enable_motion:=false` 可只规划：
+
+```shell
+ros2 run piper piper_move_x --ros-args \
+  -p motion_algorithm:=moveit \
+  -p distance_mm:=50.0 \
+  -p enable_motion:=false
+```
+
+真机执行时将 `enable_motion` 改为 `true`。MoveIt 返回成功后，节点仍会使用
+真实 `/tcp_pose` 做 `2 mm` 最终位置验收。两种模式遇到反馈过期、机械臂
+故障或控制源冲突都会中止。
+
 ros2 service list
 
 ```shell
@@ -322,12 +365,11 @@ int32 mode1
 int32 mode2
 ```
 
-## 4 Moveit规划器和仿真环境
+## 4 Moveit规划器
 
 |说明 |文档|
 |---|---|
 |Moveit|[Moveit README](src/piper_moveit/README.md)|
-|仿真|[仿真 README](src/piper_sim/README.md)|
 
 ## 5 Q&A
 

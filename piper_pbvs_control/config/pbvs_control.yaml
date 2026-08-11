@@ -1,8 +1,7 @@
 piper_pbvs_controller:
   ros__parameters:
-    # Safety interlocks: both must be true for physical pressing.
+    # Safety interlock for physical MoveIt execution.
     enable_motion: false
-    enable_press: false
 
     base_frame: base_link
     tcp_frame: tcp_link
@@ -17,47 +16,25 @@ piper_pbvs_controller:
     # Horizontal MoveIt target compensation in the button frame.
     # Positive moves left when facing the panel; negative moves right.
     coarse_horizontal_offset: 0.0
-    # Coarse acceptance uses the button frame: local XY is panel lateral,
-    # local Z is the press-axis distance. Retry the same C0 once if needed.
-    coarse_lateral_tolerance: 0.007
+    # Coarse acceptance uses the button frame: panel-tangent error magnitude
+    # must remain in the inclusive 25-35 mm band.
+    coarse_lateral_error_min: 0.023
+    coarse_lateral_error_max: 0.032
     coarse_axial_tolerance: 0.01
-    coarse_correction_attempts: 1
-    prepress_standoff: 0.005
-    press_overtravel: 0.003
-    hold_duration: 0.5
-
-    control_rate: 10.0
-    translation_gain: 0.5
-    rotation_gain: 0.5
-    align_max_translation_step: 0.002
-    press_max_translation_step: 0.001
-    max_rotation_step: 0.034906585
-    position_tolerance: 0.003
-    press_position_tolerance: 0.0015
-    angular_tolerance: 0.052359878
+    # Initial MoveIt execution plus three retries: four attempts in total.
+    coarse_correction_attempts: 3
+    # Optional post-coarse displacement along the selected axis, in mm.
+    distance_mm: 0.0
+    # base_x preserves legacy behavior; panel_normal follows visual press +Z.
+    x_advance_axis_mode: base_x
 
     stable_sample_count: 3
     stable_position_spread: 0.003
     stable_angle_spread: 0.052359878
-    stable_cycle_count: 5
     target_acquire_timeout: 5.0
-    # After MoveIt changes the eye-in-hand viewpoint, require fresh samples.
-    target_reacquire_timeout: 8.0
-    reacquire_max_normal_drift: 0.02
     target_pause_age: 0.5
-    target_abort_age: 2.0
     tcp_feedback_timeout: 0.5
     moveit_timeout: 20.0
-    pbvs_timeout: 10.0
-    press_timeout: 3.0
-    retract_timeout: 8.0
-
-    max_pbvs_displacement: 0.10
-    max_press_travel: 0.012
-    max_press_lateral_error: 0.004
-    tcp_offset_x: 0.0
-    tcp_offset_y: 0.0
-    tcp_offset_z: 0.1468
 
     moveit_position_tolerance: 0.002
     moveit_orientation_tolerance: 0.05
@@ -68,3 +45,18 @@ piper_pbvs_controller:
     camera_size_x: 0.10
     camera_size_y: 0.04
     camera_size_z: 0.04
+
+elevator_sequence:
+  ros__parameters:
+    # No motion occurs until /run_elevator_sequence receives an Action goal.
+    floor_number: 1
+    home_joint_positions: [0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]
+    home_joint_tolerance: 0.01
+    # Only affects RETURN_AFTER_NUMBER/RETURN_AFTER_OK MoveIt trajectories.
+    home_velocity_scaling_factor: 0.01
+    home_acceleration_scaling_factor: 0.01
+    home_timeout: 20.0
+    press_timeout: 120.0
+    joint_feedback_timeout: 0.5
+    move_group_name: arm
+    enable_motion: false

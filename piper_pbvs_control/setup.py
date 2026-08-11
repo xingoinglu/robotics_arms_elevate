@@ -29,11 +29,13 @@ setup(
     zip_safe=True,
     maintainer='xie',
     maintainer_email='xie@todo.todo',
-    description='MoveIt coarse approach and PBVS button pressing for Piper.',
+    description='Vision-guided MoveIt coarse positioning for Piper.',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'elevator_sequence = '
+            'piper_pbvs_control.elevator_sequence:main',
             'pbvs_controller = '
             'piper_pbvs_control.pbvs_controller:main',
         ],

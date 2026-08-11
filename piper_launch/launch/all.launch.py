@@ -132,13 +132,40 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'enable_motion',
             default_value='false',
-            description='Allow coarse and PBVS physical motion.',
+            description='Allow physical MoveIt coarse positioning.',
         ),
         DeclareLaunchArgument(
-            'enable_press',
-            default_value='false',
-            description='Allow contact pressing; requires enable_motion.',
+            'floor_number',
+            default_value='1',
+            description=(
+                'Default 0-9 floor used by an explicit sequence goal.'
+            ),
         ),
+
+        #设置返回ok按钮的位置速度设置
+        DeclareLaunchArgument(
+            'home_joint_positions',
+            default_value='[0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]',
+            description='Six arm home joint positions in radians.',
+        ),
+        DeclareLaunchArgument(
+            'home_joint_tolerance',
+            default_value='0.012',
+        ),
+        DeclareLaunchArgument(
+            'home_velocity_scaling_factor',
+            default_value='0.07',
+            description='MoveIt velocity scaling used only for home return.',
+        ),
+        DeclareLaunchArgument(
+            'home_acceleration_scaling_factor',
+            default_value='0.07',
+            description=(
+                'MoveIt acceleration scaling used only for home return.'
+            ),
+        ),
+        DeclareLaunchArgument('home_timeout', default_value='30.0'),
+        DeclareLaunchArgument('press_timeout', default_value='120.0'),
         DeclareLaunchArgument(
             'orientation_mode',
             default_value='preserve_current_roll',
@@ -156,9 +183,14 @@ def generate_launch_description():
             ),
         ),
         DeclareLaunchArgument(
-            'coarse_lateral_tolerance',
-            default_value='0.007',
-            description='Maximum button-plane lateral error in metres.',
+            'coarse_lateral_error_min',
+            default_value='0.023',
+            description='Minimum accepted panel lateral error in metres.',
+        ),
+        DeclareLaunchArgument(
+            'coarse_lateral_error_max',
+            default_value='0.032',
+            description='Maximum accepted panel lateral error in metres.',
         ),
         DeclareLaunchArgument(
             'coarse_axial_tolerance',
@@ -167,16 +199,20 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'coarse_correction_attempts',
-            default_value='1',
+            default_value='3',
             description='MoveIt corrections after first coarse arrival.',
         ),
         DeclareLaunchArgument(
-            'target_reacquire_timeout',
-            default_value='8.0',
+            'distance_mm',
+            default_value='0.0',
+            description=(
+                'Optional post-coarse advance displacement in mm.'
+            ),
         ),
         DeclareLaunchArgument(
-            'reacquire_max_normal_drift',
-            default_value='0.02',
+            'x_advance_axis_mode',
+            default_value='base_x',
+            description='Advance axis: base_x or panel_normal.',
         ),
         DeclareLaunchArgument('plane_outer_scale', default_value='2.0'),
         DeclareLaunchArgument('plane_inner_scale', default_value='1.0'),
@@ -291,14 +327,31 @@ def generate_launch_description():
                 'enable_handeye_tf'
             ),
             'enable_motion': LaunchConfiguration('enable_motion'),
-            'enable_press': LaunchConfiguration('enable_press'),
+            'floor_number': LaunchConfiguration('floor_number'),
+            'home_joint_positions': LaunchConfiguration(
+                'home_joint_positions'
+            ),
+            'home_joint_tolerance': LaunchConfiguration(
+                'home_joint_tolerance'
+            ),
+            'home_velocity_scaling_factor': LaunchConfiguration(
+                'home_velocity_scaling_factor'
+            ),
+            'home_acceleration_scaling_factor': LaunchConfiguration(
+                'home_acceleration_scaling_factor'
+            ),
+            'home_timeout': LaunchConfiguration('home_timeout'),
+            'press_timeout': LaunchConfiguration('press_timeout'),
             'orientation_mode': LaunchConfiguration('orientation_mode'),
             'coarse_standoff': LaunchConfiguration('coarse_standoff'),
             'coarse_horizontal_offset': LaunchConfiguration(
                 'coarse_horizontal_offset'
             ),
-            'coarse_lateral_tolerance': LaunchConfiguration(
-                'coarse_lateral_tolerance'
+            'coarse_lateral_error_min': LaunchConfiguration(
+                'coarse_lateral_error_min'
+            ),
+            'coarse_lateral_error_max': LaunchConfiguration(
+                'coarse_lateral_error_max'
             ),
             'coarse_axial_tolerance': LaunchConfiguration(
                 'coarse_axial_tolerance'
@@ -306,11 +359,9 @@ def generate_launch_description():
             'coarse_correction_attempts': LaunchConfiguration(
                 'coarse_correction_attempts'
             ),
-            'target_reacquire_timeout': LaunchConfiguration(
-                'target_reacquire_timeout'
-            ),
-            'reacquire_max_normal_drift': LaunchConfiguration(
-                'reacquire_max_normal_drift'
+            'distance_mm': LaunchConfiguration('distance_mm'),
+            'x_advance_axis_mode': LaunchConfiguration(
+                'x_advance_axis_mode'
             ),
             'plane_outer_scale': LaunchConfiguration('plane_outer_scale'),
             'plane_inner_scale': LaunchConfiguration('plane_inner_scale'),

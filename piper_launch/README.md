@@ -8,7 +8,7 @@ Gemini 335L RGB-D 相机
         ↓
 YOLO 按键检测 + 手眼 TF
         ↓
-MoveIt 粗定位 + PBVS 对准/按压
+MoveIt 粗定位
         ↓
 Piper 实机驱动
 ```
@@ -20,8 +20,7 @@ Piper 实机驱动
 - `piper_with_gripper_moveit/real_feedback_demo.launch.py`
 - `piper_pbvs_control/elevator_press.launch.py`
 
-所有物理运动开关默认关闭。默认启动不会自动使能机械臂，也不会发布
-PBVS 真机运动或按压命令。
+所有物理运动开关默认关闭。默认启动不会自动使能或移动机械臂。
 
 ## 1. 前置条件
 
@@ -33,7 +32,7 @@ PBVS 真机运动或按压命令。
 - YOLO Detect 模型存在，并通过 `PIPER_MODEL_PATH` 环境变量或
   `model_path` 启动参数指定，不要将模型文件提交到 Git。
 - `piper_tf/config/handeye.yaml` 与当前相机安装位置一致。
-- 驱动和 PBVS 使用相同的标定 TCP 偏置，默认 `z=0.1468 m`。
+- 驱动和 MoveIt 使用相同的标定 TCP 偏置，默认 `z=0.1468 m`。
 
 主入口默认使用 `640×360@30 Y16` 原生深度和 `High Density` 设备预设。
 相比相机自动选择的 `848×480`，该配置更适合约 `0.3～0.5 m` 的眼在手上
@@ -81,7 +80,6 @@ ros2 launch piper_launch all.launch.py \
   model_path:=/path/to/best.pt \
   auto_enable:=false \
   enable_motion:=false \
-  enable_press:=false \
   orientation_mode:=preserve_current_roll
 ```
 
@@ -101,6 +99,31 @@ ros2 action list
 ros2 action send_goal /press_button \
   piper_msgs/action/PressButton \
   "{target_name: 'key_3'}" --feedback
+```
+
+完整的“数字键→回初始位→OK→回初始位”任务必须显式发送另一个 Action；
+启动节点本身不会运动。空目标使用 `floor_number`（默认 1）：
+
+```bash
+ros2 action send_goal /run_elevator_sequence \
+  piper_msgs/action/PressButton \
+  "{target_name: ''}" --feedback
+```
+
+本次覆盖为数字 3：
+
+```bash
+ros2 action send_goal /run_elevator_sequence \
+  piper_msgs/action/PressButton \
+  "{target_name: '3'}" --feedback
+```
+
+启动时可设置默认数字和六轴初始位：
+
+```bash
+ros2 launch piper_launch all.launch.py \
+  floor_number:=3 \
+  home_joint_positions:="[0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]"
 ```
 
 dry-run 应经过：
@@ -152,8 +175,7 @@ ros2 launch piper_launch all.launch.py \
 ```bash
 ros2 launch piper_launch all.launch.py \
   auto_enable:=false \
-  enable_motion:=false \
-  enable_press:=false
+  enable_motion:=false
 ```
 
 `real_feedback_demo.launch.py` 会启动
@@ -166,9 +188,9 @@ ros2 launch piper_launch all.launch.py \
 
 默认姿态策略为 `orientation_mode:=preserve_current_roll`。控制器在每次
 Action 获取稳定目标后读取最新 `/tcp_pose`，保持当时的末端滚转，只让
-TCP `+Z` 轴以最短旋转对齐按钮按压方向。该姿态贯穿 MoveIt 粗定位、
-PBVS、按压和回撤，可避免视觉完整姿态使末端额外旋转 90 度。设置
-`orientation_mode:=world_up` 可恢复旧行为。
+TCP `+Z` 轴以最短旋转对齐按钮按压方向。该姿态用于 MoveIt 粗定位，可
+避免视觉完整姿态使末端额外旋转 90 度。设置
+`orientation_mode:=world_up` 可使用视觉完整姿态。
 
 `real_feedback_demo.launch.py` 不启动
 `mock_components/GenericSystem`、`ros2_control_node` 或模拟
@@ -176,34 +198,29 @@ PBVS、按压和回撤，可避免视觉完整姿态使末端额外旋转 90 度
 `piper_ctrl_single_node`，MoveIt、`robot_state_publisher` 和 RViz 都使用
 这一路真机反馈。
 
-## 6. 完整按压参数
+## 6. MoveIt 初定位验收
 
-真实 Piper `FollowJointTrajectory` 控制器经过单独验收后，完整按压流程才可
-使用。任务参数包括：
-
-- 粗定位距离：`80 mm`
-- 预按压距离：`5 mm`
-- 按压过行程：`3 mm`
-- 最大按压轴向行程：`12 mm`
-- 最大横向偏移：`4 mm`
-
-完整执行时，粗定位后的状态为：
+真实 Piper `FollowJointTrajectory` 控制器经过单独验收后，才可设置
+`enable_motion:=true`。完整状态为：
 
 ```text
-COARSE_APPROACH → REACQUIRE_TARGET → PBVS_ALIGN
+WAIT_TARGET → COARSE_APPROACH → DONE → IDLE
 ```
 
-视觉节点会在机械臂移动前用 5 个稳定平面锁定电梯面板。控制器清除旧的
-按钮位姿后，在新视角用 RGB 按钮中心射线与锁定面板求交，重新取得 5 个
-新鲜、稳定的样本后才进入 PBVS。回撤使用粗定位结束时实测的
-`/tcp_pose`；PBVS 同时保持该实测姿态，只细化位置。
-终端会为每个状态输出中文的 `【阶段开始】`、`【阶段成功】` 或
-`【阶段失败】` 提示；`/pbvs/state` 仍保留英文值供程序订阅。
+默认粗定位法向距离为 `80 mm`，法向允许误差为 `±10 mm`。B0 与实测 T0
+之间的面板切平面误差模长必须位于 `25～35 mm` 闭区间。首次定位失败后
+最多再使用同一个 B0 和 C0 校正 3 次，即最多执行 4 次 MoveIt。任意一次
+成功后机械臂保持在 T0，任务直接完成，不执行 PBVS、按压或自动回撤。
 
-如果停在 `REACQUIRE_TARGET`，先观察 YOLO 是否仍有目标二维框。面板锁定
-后近距离不再依赖中心深度；出现射线无法安全求交或 B1 法向漂移超过
-`20 mm` 时，应检查手眼 TF、按钮框和初始面板锁定，不要增大 PBVS 位移
-限制绕过保护。
+当前视觉横向坐标需要补偿时可设置：
+
+```bash
+ros2 launch piper_launch all.launch.py \
+  coarse_horizontal_offset:=0.03
+```
+
+正值表示面向电梯时向左。终端会打印未补偿 C0、补偿后 C0、实测 T0、
+实测水平位移、法向距离以及横向误差范围。
 
 如果在最初的 `WAIT_TARGET` 就出现 `No valid aligned depth`，说明相机还
 没取得按钮三维位置，MoveIt 不会启动。先确认相机距离面板至少约
@@ -219,10 +236,9 @@ ros2 launch piper_launch all.launch.py \
 
 此时降低 `plane_min_points` 不能修复按钮框深度全为零的问题；若有效点
 只有个位数，应增大相机距离或检查面板反光、遮挡和红外投射，而不是继续
-放宽 PBVS 安全门限。
+放宽粗定位安全门限。
 
-控制器没有力传感反馈。真机应使用柔性按键触头，并由操作员全程手持
-急停。
+真机运动时应由操作员全程手持急停。
 
 ## 7. 启动参数
 
@@ -240,13 +256,16 @@ ros2 launch piper_launch all.launch.py \
 | `camera_device_preset` | `High Density` | 提高深度有效像素填充率 |
 | `start_piper` | `true` | 启动 Piper 实机驱动 |
 | `start_moveit` | `true` | 启动 MoveIt 和 RViz |
-| `start_pbvs` | `true` | 启动视觉、手眼 TF 和 PBVS |
+| `start_pbvs` | `true` | 启动视觉、手眼 TF 和粗定位控制器 |
 | `use_rviz` | `true` | 随 MoveIt 启动 RViz |
 | `enable_motion` | `false` | 真机运动开关；开启前必须完成轨迹控制器验收 |
-| `enable_press` | `false` | 预留接触按压开关，要求运动已开启 |
 | `orientation_mode` | `preserve_current_roll` | 保持任务起始滚转；`world_up` 为旧行为 |
 | `coarse_horizontal_offset` | `0.0` | 粗定位水平补偿，单位米；面向电梯时正值向左、负值向右，范围 ±0.05 |
-| `coarse_lateral_tolerance` | `0.007` | 粗定位面板切平面最大误差，单位米 |
+| `coarse_lateral_error_min` | `0.025` | 粗定位面板切平面误差下限，单位米 |
+| `coarse_lateral_error_max` | `0.035` | 粗定位面板切平面误差上限，单位米 |
+| `coarse_correction_attempts` | `3` | 首次定位后的校正次数；总计最多执行4次 |
+| `distance_mm` | `0.0` | 粗定位成功后的按压位移，范围 `±100 mm`；0 不移动 |
+| `x_advance_axis_mode` | `base_x` | `base_x` 沿固定基座X轴；`panel_normal` 沿视觉面板按压轴 |
 | `enable_handeye_tf` | `true` | 发布当前功能包配置的手眼 TF |
 
 查看完整参数：
@@ -278,7 +297,6 @@ ros2 launch piper_launch diagnostic.launch.py duration:=8
 ros2 topic echo /pbvs/state
 ros2 topic echo /piper_vision/button_pose
 ros2 topic echo /pbvs/desired_tcp_pose
-ros2 topic echo /pbvs/commanded_flange_pose
 ros2 run tf2_ros tf2_echo base_link camera_color_optical_frame
 ```
 
@@ -325,12 +343,12 @@ ros2 topic info /joint_ctrl_single --verbose
 
 ## 10. 停止
 
-正常情况下，等待 Action 完成回撤后再停止 launch。失能机械臂：
+正常情况下，等待 Action 完成初定位并进入 `DONE` 后再停止 launch。失能机械臂：
 
 ```bash
 ros2 service call /enable_srv piper_msgs/srv/Enable \
   "{enable_request: false}"
 ```
 
-发生不可控运动、碰撞风险或硬件错误时，优先按下物理急停，不要依赖软件
-回撤。
+发生不可控运动、碰撞风险或硬件错误时，优先按下物理急停。粗定位控制器
+不会自动回撤。

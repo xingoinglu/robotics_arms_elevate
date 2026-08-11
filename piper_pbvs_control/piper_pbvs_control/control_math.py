@@ -1,8 +1,36 @@
-"""Pure pose mathematics for PBVS control."""
+"""Pure pose mathematics for MoveIt coarse positioning."""
 
 import math
 
 import numpy as np
+
+
+MAX_X_DISTANCE_MM = 100.0
+
+
+def x_distance_metres(distance_mm):
+    """Validate a signed base-X displacement and return metres."""
+    distance = float(distance_mm)
+    if not math.isfinite(distance):
+        raise ValueError('distance_mm must be finite')
+    if abs(distance) > MAX_X_DISTANCE_MM:
+        raise ValueError(
+            f'distance_mm must be within +/-{MAX_X_DISTANCE_MM:g} mm'
+        )
+    return distance / 1000.0
+
+
+def translated_base_x(position, displacement_m):
+    """Translate a finite three-dimensional position along base-frame X."""
+    position = np.asarray(position, dtype=np.float64).reshape(3)
+    displacement = float(displacement_m)
+    if not np.all(np.isfinite(position)):
+        raise ValueError('position must contain three finite values')
+    if not math.isfinite(displacement):
+        raise ValueError('displacement_m must be finite')
+    result = position.copy()
+    result[0] += displacement
+    return result
 
 
 def normalize_quaternion(quaternion):
@@ -191,12 +219,38 @@ def coarse_standoff_errors(
     return axial_distance, axial_error, lateral_vector, lateral_error
 
 
-def signed_normal_drift(reference_position, new_position, quaternion):
-    """Project a target-position change onto the locked press normal."""
-    reference = np.asarray(reference_position, dtype=np.float64).reshape(3)
-    new = np.asarray(new_position, dtype=np.float64).reshape(3)
-    press_axis = quaternion_to_matrix(quaternion)[:, 2]
-    return float(np.dot(new - reference, press_axis))
+def coarse_lateral_error_in_range(error, minimum, maximum):
+    """Return whether a coarse lateral-error magnitude is in a closed range."""
+    error = float(error)
+    minimum = float(minimum)
+    maximum = float(maximum)
+    return minimum <= error <= maximum
+
+
+def coarse_pose_is_acceptable(
+    axial_error,
+    lateral_error,
+    angular_error,
+    axial_tolerance,
+    lateral_minimum,
+    lateral_maximum,
+    angular_tolerance,
+):
+    """Apply all measured coarse-positioning acceptance limits."""
+    return (
+        abs(float(axial_error)) <= float(axial_tolerance)
+        and coarse_lateral_error_in_range(
+            lateral_error,
+            lateral_minimum,
+            lateral_maximum,
+        )
+        and float(angular_error) <= float(angular_tolerance)
+    )
+
+
+def coarse_total_attempts(enable_motion, correction_attempts):
+    """Return one dry-run plan or initial motion plus configured retries."""
+    return 1 + int(correction_attempts) if enable_motion else 1
 
 
 def pose_error(target_position, target_quaternion, current_position,
@@ -210,60 +264,6 @@ def pose_error(target_position, target_quaternion, current_position,
     return translation, rotation, np.linalg.norm(translation), np.linalg.norm(
         rotation
     )
-
-
-def limited_pose_step(
-    current_position,
-    current_quaternion,
-    target_position,
-    target_quaternion,
-    translation_gain,
-    rotation_gain,
-    max_translation,
-    max_rotation,
-):
-    """Apply bounded proportional translation and rotation pose steps."""
-    translation, rotation, _, _ = pose_error(
-        target_position,
-        target_quaternion,
-        current_position,
-        current_quaternion,
-    )
-    translation *= translation_gain
-    rotation *= rotation_gain
-    translation_norm = np.linalg.norm(translation)
-    rotation_norm = np.linalg.norm(rotation)
-    if translation_norm > max_translation:
-        translation *= max_translation / translation_norm
-    if rotation_norm > max_rotation:
-        rotation *= max_rotation / rotation_norm
-
-    new_position = np.asarray(current_position) + translation
-    current_rotation = quaternion_to_matrix(current_quaternion)
-    new_rotation = rotation_from_vector(rotation) @ current_rotation
-    return new_position, matrix_to_quaternion(new_rotation)
-
-
-def tcp_to_flange_pose(tcp_position, tcp_quaternion, tcp_offset):
-    """Convert a desired TCP pose to the Piper J6/flange command pose."""
-    tcp_position = np.asarray(tcp_position, dtype=np.float64).reshape(3)
-    tcp_offset = np.asarray(tcp_offset, dtype=np.float64).reshape(3)
-    rotation = quaternion_to_matrix(tcp_quaternion)
-    flange_position = tcp_position - rotation @ tcp_offset
-    return flange_position, normalize_quaternion(tcp_quaternion)
-
-
-def quaternion_to_euler_xyz(quaternion):
-    """Return XYZ fixed-axis roll, pitch, yaw in radians."""
-    rotation = quaternion_to_matrix(quaternion)
-    pitch = math.asin(np.clip(-rotation[2, 0], -1.0, 1.0))
-    if abs(math.cos(pitch)) > 1e-7:
-        roll = math.atan2(rotation[2, 1], rotation[2, 2])
-        yaw = math.atan2(rotation[1, 0], rotation[0, 0])
-    else:
-        roll = math.atan2(-rotation[1, 2], rotation[1, 1])
-        yaw = 0.0
-    return np.array([roll, pitch, yaw])
 
 
 def average_stable_poses(
