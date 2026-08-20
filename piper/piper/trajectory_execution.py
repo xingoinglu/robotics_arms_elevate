@@ -15,9 +15,10 @@ ARM_JOINTS = (
 )
 GRIPPER_JOINTS = ('joint7',)
 COMMAND_JOINTS = ARM_JOINTS + GRIPPER_JOINTS
-#修改初始位置READY_ARM_POSITIONS
+#修改初始位置     READY_ARM_POSITIONS
 READY_ARM_POSITIONS = (0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0)
 
+#限制角度
 JOINT_LIMITS = {
     'joint1': (-2.618, 2.168),
     'joint2': (0.0, 3.14),
@@ -27,7 +28,6 @@ JOINT_LIMITS = {
     'joint6': (-2.0944, 2.0944),
     'joint7': (0.0, 0.035),
 }
-
 
 def startup_state_error(arm_positions, boundary_recovery_tolerance):
     """Return why a measured startup state cannot be safely normalized."""
