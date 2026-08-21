@@ -15,8 +15,16 @@ ARM_JOINTS = (
 )
 GRIPPER_JOINTS = ('joint7',)
 COMMAND_JOINTS = ARM_JOINTS + GRIPPER_JOINTS
-#修改初始位置     READY_ARM_POSITIONS
-READY_ARM_POSITIONS = (0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0)
+# Complete joint1-joint7 target used by /initialize_arm.
+READY_POSITIONS = (
+    1.613151344,
+    0.18368532,
+    -0.9555648760000002,
+    0.10300682000000001,
+    0.785450988,
+    -0.042511028,
+    0.0,
+)
 
 #限制角度
 JOINT_LIMITS = {

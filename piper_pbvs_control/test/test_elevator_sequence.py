@@ -55,6 +55,20 @@ def test_home_positions_require_six_finite_values():
         validate_home_joint_positions([0.0] * 5 + [math.nan])
 
 
+def test_default_home_matches_initial_arm_pose():
+    """Button sequences return the arm to the requested initial pose."""
+    assert DEFAULT_HOME_JOINT_POSITIONS == pytest.approx(
+        (
+            1.613151344,
+            0.18368532,
+            -0.9555648760000002,
+            0.10300682000000001,
+            0.785450988,
+            -0.042511028,
+        )
+    )
+
+
 def test_home_errors_map_joint_state_by_name():
     """Joint feedback order does not affect home verification."""
     message = JointState()
@@ -66,7 +80,14 @@ def test_home_errors_map_joint_state_by_name():
         'joint5',
         'joint4',
     ]
-    message.position = [-0.53, 0.01, -0.02, 0.42, 0.03, -0.04]
+    message.position = [
+        -0.944664876,
+        1.623151344,
+        -0.062511028,
+        0.18728532,
+        0.815450988,
+        0.06300682,
+    ]
     errors = home_joint_errors(message, DEFAULT_HOME_JOINT_POSITIONS)
     assert errors == pytest.approx((0.01, 0.0036, 0.0109, 0.04, 0.03, 0.02))
 

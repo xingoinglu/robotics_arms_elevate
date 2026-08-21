@@ -36,6 +36,8 @@ setup(
         'console_scripts': [
             'elevator_sequence = '
             'piper_pbvs_control.elevator_sequence:main',
+            'joint_zero_return = '
+            'piper_pbvs_control.joint_zero_return:main',
             'pbvs_controller = '
             'piper_pbvs_control.pbvs_controller:main',
         ],

@@ -126,7 +126,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'initialization_speed_percent',
-            default_value='5',
+            default_value='12',
             description='Piper speed percentage during direct Ready motion.',
         ),
         DeclareLaunchArgument(

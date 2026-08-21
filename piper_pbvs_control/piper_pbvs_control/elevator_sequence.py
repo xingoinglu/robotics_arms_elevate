@@ -26,12 +26,12 @@ from std_msgs.msg import String
 ARM_JOINT_NAMES = tuple(f'joint{index}' for index in range(1, 7))
 HOME_JOINT_ACCEPTANCE_SLACK = 0.001
 DEFAULT_HOME_JOINT_POSITIONS = (
-    0.0,
-    0.4164,
-    -0.5409,
-    0.0,
-    0.0,
-    0.0,
+    1.613151344,
+    0.18368532,
+    -0.9555648760000002,
+    0.10300682000000001,
+    0.785450988,
+    -0.042511028,
 )
 
 

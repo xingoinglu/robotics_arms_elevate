@@ -1,12 +1,32 @@
 """Tests for coarse-positioning diagnostic helpers."""
 
 import numpy as np
+import pytest
 
 from geometry_msgs.msg import PoseStamped
 from moveit_msgs.action import MoveGroup
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 from piper_pbvs_control.pbvs_controller import PiperPbvsController
+
+
+def test_moveit_goal_explicitly_sets_seven_percent_scaling():
+    class Controller:
+        base_frame = 'base_link'
+        tcp_frame = 'tcp_link'
+        move_group_name = 'arm'
+        moveit_position_tolerance = 0.002
+        moveit_orientation_tolerance = 0.05
+        moveit_velocity_scaling_factor = 0.07
+        moveit_acceleration_scaling_factor = 0.07
+
+    target = PoseStamped()
+    target.pose.orientation.w = 1.0
+
+    goal = PiperPbvsController._moveit_goal(Controller(), target, False)
+
+    assert goal.request.max_velocity_scaling_factor == pytest.approx(0.07)
+    assert goal.request.max_acceleration_scaling_factor == pytest.approx(0.07)
 
 
 def _set_final_point(robot_trajectory, names, positions):

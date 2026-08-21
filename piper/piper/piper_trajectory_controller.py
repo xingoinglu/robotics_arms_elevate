@@ -27,7 +27,7 @@ from piper.trajectory_execution import (
     COMMAND_JOINTS,
     GRIPPER_JOINTS,
     PiperCanFeedbackState,
-    READY_ARM_POSITIONS,
+    READY_POSITIONS,
     TrajectoryValidationError,
     duration_seconds,
     normalize_trajectory,
@@ -64,7 +64,7 @@ class PiperTrajectoryController(Node):
         self.declare_parameter('initialization_reset_gap', 1.0)
         self.declare_parameter('initialization_goal_tolerance', 0.05)
         self.declare_parameter('initialization_duration', 12.0)
-        self.declare_parameter('initialization_speed_percent', 5)
+        self.declare_parameter('initialization_speed_percent', 12)
         self.declare_parameter('initialization_max_step', 0.002)
         self.declare_parameter('initialization_path_tolerance', 0.25)
 
@@ -528,11 +528,11 @@ class PiperTrajectoryController(Node):
         return True, ''
 
     def _run_direct_initialization(self, start_positions):
-        """Slowly interpolate all six real joints to the Ready pose."""
+        """Slowly interpolate all seven real joints to the Ready pose."""
         start = tuple(float(value) for value in start_positions)
         maximum_delta = max(
             abs(target - current)
-            for current, target in zip(start, READY_ARM_POSITIONS)
+            for current, target in zip(start, READY_POSITIONS)
         )
         step_limited_duration = (
             1.5 * maximum_delta
@@ -555,7 +555,7 @@ class PiperTrajectoryController(Node):
             if elapsed >= duration:
                 break
 
-            ready, reason = self._hardware_ready('arm')
+            ready, reason = self._hardware_ready('gripper')
             if not ready:
                 return False, reason
             raw_positions, raw_received_at = self._raw_snapshot()
@@ -572,20 +572,33 @@ class PiperTrajectoryController(Node):
                 current + blend * (target - current)
                 for current, target in zip(
                     start,
-                    READY_ARM_POSITIONS,
+                    READY_POSITIONS,
                 )
             )
-            tracking_error = max(
+            arm_tracking_error = max(
                 abs(target - measured)
-                for target, measured in zip(desired, raw_positions)
+                for target, measured in zip(
+                    desired[:len(ARM_JOINTS)],
+                    raw_positions[:len(ARM_JOINTS)],
+                )
             )
-            if tracking_error > self.initialization_path_tolerance:
+            if arm_tracking_error > self.initialization_path_tolerance:
                 return False, (
                     'initialization tracking error exceeded tolerance '
-                    f'({tracking_error:.6f} rad)'
+                    f'({arm_tracking_error:.6f} rad)'
                 )
-            self._publish_command(
-                'arm',
+            gripper_tracking_error = abs(
+                desired[-1] - raw_positions[-1]
+            )
+            if (
+                gripper_tracking_error
+                > self.group_parameters['gripper']['path_tolerance']
+            ):
+                return False, (
+                    'initialization gripper tracking error exceeded '
+                    f'tolerance ({gripper_tracking_error:.6f} m)'
+                )
+            self._publish_complete_command(
                 desired,
                 speed_percent=self.initialization_speed_percent,
             )
@@ -593,7 +606,7 @@ class PiperTrajectoryController(Node):
 
         deadline = time.monotonic() + self.initialization_timeout
         while time.monotonic() <= deadline:
-            ready, reason = self._hardware_ready('arm')
+            ready, reason = self._hardware_ready('gripper')
             if not ready:
                 return False, reason
             raw_positions, raw_received_at = self._raw_snapshot()
@@ -603,18 +616,24 @@ class PiperTrajectoryController(Node):
                 > self.joint_state_timeout
             ):
                 return False, '/joint_states_raw feedback is stale'
-            final_error = max(
+            arm_final_error = max(
                 abs(measured - target)
                 for measured, target in zip(
-                    raw_positions,
-                    READY_ARM_POSITIONS,
+                    raw_positions[:len(ARM_JOINTS)],
+                    READY_POSITIONS[:len(ARM_JOINTS)],
                 )
             )
-            if final_error <= self.initialization_goal_tolerance:
+            gripper_final_error = abs(
+                raw_positions[-1] - READY_POSITIONS[-1]
+            )
+            if (
+                arm_final_error <= self.initialization_goal_tolerance
+                and gripper_final_error
+                <= self.group_parameters['gripper']['goal_tolerance']
+            ):
                 return True, ''
-            self._publish_command(
-                'arm',
-                READY_ARM_POSITIONS,
+            self._publish_complete_command(
+                READY_POSITIONS,
                 speed_percent=self.initialization_speed_percent,
             )
             time.sleep(period)
@@ -637,9 +656,10 @@ class PiperTrajectoryController(Node):
                 return response
             self.initialization_in_progress = True
             self.active['arm'] = True
+            self.active['gripper'] = True
 
         try:
-            ready, reason = self._hardware_ready('arm')
+            ready, reason = self._hardware_ready('gripper')
             if not ready:
                 response.success = False
                 response.message = reason
@@ -652,9 +672,7 @@ class PiperTrajectoryController(Node):
                 return response
 
             raw_positions, _ = self._raw_snapshot()
-            moved, reason = self._run_direct_initialization(
-                raw_positions[:len(ARM_JOINTS)]
-            )
+            moved, reason = self._run_direct_initialization(raw_positions)
             if not moved:
                 response.success = False
                 response.message = reason
@@ -671,18 +689,31 @@ class PiperTrajectoryController(Node):
                     'raw feedback was lost after initialization'
                 )
                 return response
-            final_error = max(
+            arm_final_error = max(
                 abs(measured - target)
                 for measured, target in zip(
                     raw_positions[:len(ARM_JOINTS)],
-                    READY_ARM_POSITIONS,
+                    READY_POSITIONS[:len(ARM_JOINTS)],
                 )
             )
-            if final_error > self.initialization_goal_tolerance:
+            if arm_final_error > self.initialization_goal_tolerance:
                 response.success = False
                 response.message = (
                     'real arm did not reach Ready tolerance '
-                    f'({final_error:.6f} rad)'
+                    f'({arm_final_error:.6f} rad)'
+                )
+                return response
+            gripper_final_error = abs(
+                raw_positions[-1] - READY_POSITIONS[-1]
+            )
+            if (
+                gripper_final_error
+                > self.group_parameters['gripper']['goal_tolerance']
+            ):
+                response.success = False
+                response.message = (
+                    'real gripper did not reach Ready tolerance '
+                    f'({gripper_final_error:.6f} m)'
                 )
                 return response
 
@@ -698,7 +729,8 @@ class PiperTrajectoryController(Node):
                 self.initialized = True
             response.success = True
             response.message = (
-                'real Piper reached Ready by direct low-speed JointCtrl'
+                'real Piper arm and gripper reached Ready by direct '
+                'low-speed JointCtrl'
             )
             self.get_logger().info(response.message)
             return response
@@ -713,6 +745,7 @@ class PiperTrajectoryController(Node):
             with self.execution_lock:
                 self.initialization_in_progress = False
                 self.active['arm'] = False
+                self.active['gripper'] = False
 
     def _cancel_callback(self, group, _goal_handle):
         """Accept cancellation for either real controller."""
@@ -762,6 +795,23 @@ class PiperTrajectoryController(Node):
         )
         selected_speed = min(max(selected_speed, 1), 100)
         # The existing Piper driver uses velocity[6] as global speed percent.
+        command.velocity = [0.0] * 6 + [float(selected_speed)]
+        command.effort = [0.0] * 6 + [self.gripper_effort]
+        self.command_pub.publish(command)
+
+    def _publish_complete_command(self, positions, speed_percent):
+        """Publish one complete seven-joint initialization command."""
+        complete_positions = tuple(float(value) for value in positions)
+        if len(complete_positions) != len(COMMAND_JOINTS):
+            raise ValueError('complete command must contain seven joints')
+        with self.execution_lock:
+            self.command_positions = list(complete_positions)
+
+        command = JointState()
+        command.header.stamp = self.get_clock().now().to_msg()
+        command.name = list(COMMAND_JOINTS)
+        command.position = list(complete_positions)
+        selected_speed = min(max(int(speed_percent), 1), 100)
         command.velocity = [0.0] * 6 + [float(selected_speed)]
         command.effort = [0.0] * 6 + [self.gripper_effort]
         self.command_pub.publish(command)

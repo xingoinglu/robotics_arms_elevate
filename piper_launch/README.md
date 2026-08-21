@@ -123,7 +123,7 @@ ros2 action send_goal /run_elevator_sequence \
 ```bash
 ros2 launch piper_launch all.launch.py \
   floor_number:=3 \
-  home_joint_positions:="[0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]"
+  home_joint_positions:="[1.613151344, 0.18368532, -0.955564876, 0.10300682, 0.785450988, -0.042511028]"
 ```
 
 dry-run 应经过：
@@ -257,12 +257,15 @@ ros2 launch piper_launch all.launch.py \
 | `start_piper` | `true` | 启动 Piper 实机驱动 |
 | `start_moveit` | `true` | 启动 MoveIt 和 RViz |
 | `start_pbvs` | `true` | 启动视觉、手眼 TF 和粗定位控制器 |
+| `start_joint_zero_return` | `true` | 提供 `/return_all_joints_zero` 手动归零服务；启动时不会自动运动 |
 | `use_rviz` | `true` | 随 MoveIt 启动 RViz |
 | `enable_motion` | `false` | 真机运动开关；开启前必须完成轨迹控制器验收 |
 | `orientation_mode` | `preserve_current_roll` | 保持任务起始滚转；`world_up` 为旧行为 |
+| `moveit_velocity_scaling_factor` | `0.07` | 粗定位和 panel-normal 按压的 MoveIt 速度缩放（7%） |
+| `moveit_acceleration_scaling_factor` | `0.07` | 粗定位和 panel-normal 按压的 MoveIt 加速度缩放（7%） |
 | `coarse_horizontal_offset` | `0.0` | 粗定位水平补偿，单位米；面向电梯时正值向左、负值向右，范围 ±0.05 |
-| `coarse_lateral_error_min` | `0.025` | 粗定位面板切平面误差下限，单位米 |
-| `coarse_lateral_error_max` | `0.035` | 粗定位面板切平面误差上限，单位米 |
+| `coarse_lateral_error_min` | `0.009` | 粗定位面板切平面误差下限，单位米 |
+| `coarse_lateral_error_max` | `0.019` | 粗定位面板切平面误差上限，单位米 |
 | `coarse_correction_attempts` | `3` | 首次定位后的校正次数；总计最多执行4次 |
 | `distance_mm` | `0.0` | 粗定位成功后的按压位移，范围 `±100 mm`；0 不移动 |
 | `x_advance_axis_mode` | `base_x` | `base_x` 沿固定基座X轴；`panel_normal` 沿视觉面板按压轴 |
@@ -273,6 +276,15 @@ ros2 launch piper_launch all.launch.py \
 ```bash
 ros2 launch piper_launch all.launch.py --show-args
 ```
+
+主 launch 启动后，可从任意当前姿态显式请求 `joint1`～`joint7` 全部归零：
+
+```bash
+ros2 service call /return_all_joints_zero std_srvs/srv/Trigger "{}"
+```
+
+该服务复用 `enable_motion`：为 `false` 时只规划，为 `true` 时才执行并验收真实
+`/joint_states`。如不需要该服务，可设置 `start_joint_zero_return:=false`。
 
 ## 8. 诊断
 

@@ -81,7 +81,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'initialization_speed_percent',
-            default_value='5',
+            default_value='12',
             description='Piper speed percentage during initialization.',
         ),
         DeclareLaunchArgument(
@@ -127,6 +127,13 @@ def generate_launch_description():
         DeclareLaunchArgument('start_piper', default_value='true'),
         DeclareLaunchArgument('start_moveit', default_value='true'),
         DeclareLaunchArgument('start_pbvs', default_value='true'),
+        DeclareLaunchArgument(
+            'start_joint_zero_return',
+            default_value='true',
+            description=(
+                'Expose the opt-in /return_all_joints_zero service.'
+            ),
+        ),
         DeclareLaunchArgument('use_rviz', default_value='true'),
         DeclareLaunchArgument('enable_handeye_tf', default_value='true'),
         DeclareLaunchArgument(
@@ -142,10 +149,13 @@ def generate_launch_description():
             ),
         ),
 
-        #设置返回ok按钮的位置速度设置
+        # 设置返回 OK 按钮的位置和速度。
         DeclareLaunchArgument(
             'home_joint_positions',
-            default_value='[0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]',
+            default_value=(
+                '[1.613151344, 0.18368532, -0.955564876, '
+                '0.10300682, 0.785450988, -0.042511028]'
+            ),
             description='Six arm home joint positions in radians.',
         ),
         DeclareLaunchArgument(
@@ -167,6 +177,20 @@ def generate_launch_description():
         DeclareLaunchArgument('home_timeout', default_value='30.0'),
         DeclareLaunchArgument('press_timeout', default_value='120.0'),
         DeclareLaunchArgument(
+            'moveit_velocity_scaling_factor',
+            default_value='0.07',
+            description=(
+                'MoveIt velocity scaling for coarse and panel-normal moves.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'moveit_acceleration_scaling_factor',
+            default_value='0.07',
+            description=(
+                'MoveIt acceleration scaling for coarse and panel-normal moves.'
+            ),
+        ),
+        DeclareLaunchArgument(
             'orientation_mode',
             default_value='preserve_current_roll',
             description=(
@@ -184,12 +208,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'coarse_lateral_error_min',
-            default_value='0.023',
+            default_value='0.009',
             description='Minimum accepted panel lateral error in metres.',
         ),
         DeclareLaunchArgument(
             'coarse_lateral_error_max',
-            default_value='0.032',
+            default_value='0.019',
             description='Maximum accepted panel lateral error in metres.',
         ),
         DeclareLaunchArgument(
@@ -342,6 +366,12 @@ def generate_launch_description():
             ),
             'home_timeout': LaunchConfiguration('home_timeout'),
             'press_timeout': LaunchConfiguration('press_timeout'),
+            'moveit_velocity_scaling_factor': LaunchConfiguration(
+                'moveit_velocity_scaling_factor'
+            ),
+            'moveit_acceleration_scaling_factor': LaunchConfiguration(
+                'moveit_acceleration_scaling_factor'
+            ),
             'orientation_mode': LaunchConfiguration('orientation_mode'),
             'coarse_standoff': LaunchConfiguration('coarse_standoff'),
             'coarse_horizontal_offset': LaunchConfiguration(
@@ -390,5 +420,15 @@ def generate_launch_description():
             ),
         },
     )
+    joint_zero_return = _include(
+        'piper_pbvs_control',
+        'joint_zero_return.launch.py',
+        'start_joint_zero_return',
+        {
+            'enable_motion': LaunchConfiguration('enable_motion'),
+        },
+    )
 
-    return LaunchDescription(arguments + [camera, piper, moveit, pbvs])
+    return LaunchDescription(
+        arguments + [camera, piper, moveit, pbvs, joint_zero_return]
+    )

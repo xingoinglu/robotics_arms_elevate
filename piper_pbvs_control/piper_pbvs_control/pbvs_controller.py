@@ -171,6 +171,9 @@ class PiperPbvsController(Node):
             'Piper MoveIt coarse-positioning controller ready; '
             f'enable_motion={self.enable_motion}, '
             f'orientation_mode={self.orientation_mode}, '
+            f'moveit_velocity={self.moveit_velocity_scaling_factor:.3f}, '
+            f'moveit_acceleration='
+            f'{self.moveit_acceleration_scaling_factor:.3f}, '
             f'distance_mm={self.distance_m * 1000.0:+.3f}'
         )
 
@@ -186,8 +189,8 @@ class PiperPbvsController(Node):
             'orientation_mode': 'preserve_current_roll',
             'coarse_standoff': 0.08,
             'coarse_horizontal_offset': 0.0,
-            'coarse_lateral_error_min': 0.025,
-            'coarse_lateral_error_max': 0.035,
+            'coarse_lateral_error_min': 0.009,
+            'coarse_lateral_error_max': 0.019,
             'coarse_axial_tolerance': 0.01,
             'coarse_correction_attempts': 3,
             'distance_mm': 0.0,
@@ -199,6 +202,8 @@ class PiperPbvsController(Node):
             'target_pause_age': 0.5,
             'tcp_feedback_timeout': 0.5,
             'moveit_timeout': 20.0,
+            'moveit_velocity_scaling_factor': 0.07,
+            'moveit_acceleration_scaling_factor': 0.07,
             'moveit_position_tolerance': 0.002,
             'moveit_orientation_tolerance': 0.05,
             'panel_width': 0.6,
@@ -298,6 +303,12 @@ class PiperPbvsController(Node):
                 'coarse_lateral_error_min must be smaller than '
                 'coarse_lateral_error_max'
             )
+        for name in (
+            'moveit_velocity_scaling_factor',
+            'moveit_acceleration_scaling_factor',
+        ):
+            if getattr(self, name) > 1.0:
+                raise ValueError(f'{name} must not exceed 1.0')
 
     @staticmethod
     def _pose_arrays(pose):
@@ -722,6 +733,12 @@ class PiperPbvsController(Node):
         goal.request.group_name = self.move_group_name
         goal.request.num_planning_attempts = 5
         goal.request.allowed_planning_time = 5.0
+        goal.request.max_velocity_scaling_factor = (
+            self.moveit_velocity_scaling_factor
+        )
+        goal.request.max_acceleration_scaling_factor = (
+            self.moveit_acceleration_scaling_factor
+        )
         goal.request.goal_constraints = [constraints]
         goal.planning_options.plan_only = plan_only
         goal.planning_options.look_around = False

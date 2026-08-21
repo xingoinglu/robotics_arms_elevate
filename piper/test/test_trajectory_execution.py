@@ -7,6 +7,7 @@ import pytest
 from piper.trajectory_execution import (
     ARM_JOINTS,
     PiperCanFeedbackState,
+    READY_POSITIONS,
     TrajectoryValidationError,
     normalize_trajectory,
     position_tolerances,
@@ -15,6 +16,21 @@ from piper.trajectory_execution import (
     updated_settle_count,
     violating_joint,
 )
+
+
+def test_ready_pose_contains_requested_arm_and_gripper_targets():
+    """Initialization Ready pose contains all seven requested joints."""
+    assert READY_POSITIONS == pytest.approx(
+        (
+            1.613151344,
+            0.18368532,
+            -0.9555648760000002,
+            0.10300682000000001,
+            0.785450988,
+            -0.042511028,
+            0.0,
+        )
+    )
 
 
 def duration(seconds):

@@ -37,7 +37,10 @@ def generate_launch_description():
         DeclareLaunchArgument('floor_number', default_value='1'),
         DeclareLaunchArgument(
             'home_joint_positions',
-            default_value='[0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]',
+            default_value=(
+                '[1.613151344, 0.18368532, -0.955564876, '
+                '0.10300682, 0.785450988, -0.042511028]'
+            ),
             description='Six arm home joint positions in radians',
         ),
         DeclareLaunchArgument(
@@ -54,6 +57,20 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('home_timeout', default_value='20.0'),
         DeclareLaunchArgument('press_timeout', default_value='120.0'),
+        DeclareLaunchArgument(
+            'moveit_velocity_scaling_factor',
+            default_value='0.07',
+            description=(
+                'MoveIt velocity scaling for coarse and panel-normal moves'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'moveit_acceleration_scaling_factor',
+            default_value='0.07',
+            description=(
+                'MoveIt acceleration scaling for coarse and panel-normal moves'
+            ),
+        ),
         DeclareLaunchArgument(
             'orientation_mode',
             default_value='preserve_current_roll',
@@ -72,11 +89,11 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'coarse_lateral_error_min',
-            default_value='0.023',
+            default_value='0.009',
         ),
         DeclareLaunchArgument(
             'coarse_lateral_error_max',
-            default_value='0.032',
+            default_value='0.019',
         ),
         DeclareLaunchArgument(
             'coarse_axial_tolerance',
@@ -184,6 +201,18 @@ def generate_launch_description():
                     'orientation_mode': ParameterValue(
                         LaunchConfiguration('orientation_mode'),
                         value_type=str,
+                    ),
+                    'moveit_velocity_scaling_factor': ParameterValue(
+                        LaunchConfiguration(
+                            'moveit_velocity_scaling_factor'
+                        ),
+                        value_type=float,
+                    ),
+                    'moveit_acceleration_scaling_factor': ParameterValue(
+                        LaunchConfiguration(
+                            'moveit_acceleration_scaling_factor'
+                        ),
+                        value_type=float,
                     ),
                     'coarse_standoff': ParameterValue(
                         LaunchConfiguration('coarse_standoff'),

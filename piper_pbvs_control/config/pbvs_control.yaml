@@ -17,9 +17,9 @@ piper_pbvs_controller:
     # Positive moves left when facing the panel; negative moves right.
     coarse_horizontal_offset: 0.0
     # Coarse acceptance uses the button frame: panel-tangent error magnitude
-    # must remain in the inclusive 25-35 mm band.
-    coarse_lateral_error_min: 0.023
-    coarse_lateral_error_max: 0.032
+    # must remain in the inclusive 9-19 mm band.
+    coarse_lateral_error_min: 0.009
+    coarse_lateral_error_max: 0.019
     coarse_axial_tolerance: 0.01
     # Initial MoveIt execution plus three retries: four attempts in total.
     coarse_correction_attempts: 3
@@ -35,6 +35,9 @@ piper_pbvs_controller:
     target_pause_age: 0.5
     tcp_feedback_timeout: 0.5
     moveit_timeout: 20.0
+    # Explicitly included in every coarse and panel-normal MoveIt request.
+    moveit_velocity_scaling_factor: 0.07
+    moveit_acceleration_scaling_factor: 0.07
 
     moveit_position_tolerance: 0.002
     moveit_orientation_tolerance: 0.05
@@ -50,7 +53,8 @@ elevator_sequence:
   ros__parameters:
     # No motion occurs until /run_elevator_sequence receives an Action goal.
     floor_number: 1
-    home_joint_positions: [0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]
+    home_joint_positions: [1.613151344, 0.18368532, -0.955564876,
+      0.10300682, 0.785450988, -0.042511028]
     home_joint_tolerance: 0.01
     # Only affects RETURN_AFTER_NUMBER/RETURN_AFTER_OK MoveIt trajectories.
     home_velocity_scaling_factor: 0.01

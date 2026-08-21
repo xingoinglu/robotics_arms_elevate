@@ -59,16 +59,51 @@ Action 会在发出 MoveIt 运动前中止。若单键任务已经进入 MoveIt 
 
 ```yaml
 floor_number: 1
-home_joint_positions: [0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]
+home_joint_positions: [1.613151344, 0.18368532, -0.955564876,
+  0.10300682, 0.785450988, -0.042511028]
 home_joint_tolerance: 0.01
 ```
+
+### 独立的任意姿态七关节归零节点
+
+`joint_zero_return` 是一个选择性启动的新节点，不会修改或替代任何按钮任务节点。
+它提供 `/return_all_joints_zero` Trigger 服务，从机械臂当前姿态开始，严格按以下
+顺序执行：
+
+1. 通过 MoveIt `arm` 组将 `joint1`～`joint6` 规划或执行到 `0 rad`；
+2. 通过 MoveIt `gripper` 组将 `joint7` 规划或执行到 `0 m`；
+3. 真机模式下使用新鲜 `/joint_states` 验收七个关节。
+
+该节点不会由现有 `all.launch.py` 自动启动。先进行无运动规划验证：
+
+```bash
+ros2 launch piper_pbvs_control joint_zero_return.launch.py \
+  enable_motion:=false
+```
+
+另一个终端发送归零请求：
+
+```bash
+ros2 service call /return_all_joints_zero std_srvs/srv/Trigger "{}"
+```
+
+确认 MoveIt 规划、真机反馈、驱动使能和 `/initialize_arm` 均正常后，才可显式开启
+真机运动：
+
+```bash
+ros2 launch piper_pbvs_control joint_zero_return.launch.py \
+  enable_motion:=true
+```
+
+独立状态话题为 `/joint_zero_return/state`。该节点不订阅按钮状态，也不会调用
+`/press_button`。
 
 可在总启动命令中覆盖，例如：
 
 ```bash
 ros2 launch piper_launch all.launch.py \
   floor_number:=3 \
-  home_joint_positions:="[0.0, 0.4164, -0.5409, 0.0, 0.0, 0.0]"
+  home_joint_positions:="[1.613151344, 0.18368532, -0.955564876, 0.10300682, 0.785450988, -0.042511028]"
 ```
 
 回位使用 MoveIt 关节目标并在真机模式下通过 `/joint_states` 验收，不调用只
@@ -117,9 +152,12 @@ MoveIt 将 `tcp_link` 移到按钮按压方向反向 `80 mm` 的 C0。真机到�
 - `coarse_standoff`：法向粗定位距离，默认 `0.08 m`。
 - `coarse_horizontal_offset`：水平补偿，默认 `0 m`。
 - `coarse_lateral_error_min` / `coarse_lateral_error_max`：横向验收下限和
-  上限，默认 `0.025 / 0.035 m`。
+  上限，默认 `0.009 / 0.019 m`。
 - `coarse_axial_tolerance`：法向距离误差，默认 `0.01 m`。
 - `coarse_correction_attempts`：首次定位后的校正次数，默认 `3`。
+- `moveit_velocity_scaling_factor` / `moveit_acceleration_scaling_factor`：
+  粗定位和 panel-normal 按压的 MoveIt 速度/加速度缩放，默认均为 `0.07`
+  （7%），并显式写入每个规划请求。
 - `distance_mm`：粗定位成功后的按压位移，允许 `-100～100 mm`，默认
   `0 mm` 不移动；正值靠近按钮，负值远离按钮。
 - `x_advance_axis_mode`：`base_x` 沿固定 `base_link +X`（默认，兼容旧
