@@ -17,6 +17,14 @@ def generate_launch_description():
     ])
     return LaunchDescription([
         DeclareLaunchArgument('enable_motion', default_value='false'),
+        DeclareLaunchArgument(
+            'zero_velocity_scaling_factor',
+            default_value='0.10',
+        ),
+        DeclareLaunchArgument(
+            'zero_acceleration_scaling_factor',
+            default_value='0.10',
+        ),
         Node(
             package='piper_pbvs_control',
             executable='joint_zero_return',
@@ -28,6 +36,18 @@ def generate_launch_description():
                     'enable_motion': ParameterValue(
                         LaunchConfiguration('enable_motion'),
                         value_type=bool,
+                    ),
+                    'zero_velocity_scaling_factor': ParameterValue(
+                        LaunchConfiguration(
+                            'zero_velocity_scaling_factor'
+                        ),
+                        value_type=float,
+                    ),
+                    'zero_acceleration_scaling_factor': ParameterValue(
+                        LaunchConfiguration(
+                            'zero_acceleration_scaling_factor'
+                        ),
+                        value_type=float,
                     ),
                 },
             ],

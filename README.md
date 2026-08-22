@@ -1015,8 +1015,7 @@ IDLE
 
 ```text
 IDLE
-  → PRESS_NUMBER
-  → RETURN_AFTER_NUMBER
+  → (PRESS_NUMBER → RETURN_AFTER_NUMBER) × 楼层位数
   → PRESS_OK
   → RETURN_AFTER_OK
   → DONE / ABORT
@@ -1091,17 +1090,17 @@ Action 反馈包含当前状态、位置误差、角度误差和目标数据年�
 `piper_msgs/action/PressButton` 类型。目标规范化规则为：
 
 - 空字符串：读取 `floor_number` 参数，默认 `1`；
-- `0`～`9`：转换成 `key_0`～`key_9`；
-- `key_0`～`key_9`：直接使用；
+- 一位或两位数字：逐位转换成 `key_0`～`key_9`；
+- `key_` 加一位或两位数字：同样逐位转换；
 - 其他字符串：拒绝 Action goal。
 
 严格执行过程：
 
-1. 调用 `/press_button` 定位/推进 `key_N`；
-2. 用 `/move_action` 回到 `home_joint_positions`；
-3. 调用 `/press_button` 定位/推进 `key_ok`；
+1. 对楼层的每一位数字调用 `/press_button` 定位/推进对应的 `key_N`；
+2. 每按完一位数字，都用 `/move_action` 回到 `home_joint_positions`；
+3. 所有数字完成后调用 `/press_button` 定位/推进 `key_ok`；
 4. 再次用 `/move_action` 回到初始关节位；
-5. 两个按钮和两次回位全部成功后才返回成功。
+5. 所有按钮和全部回位均成功后才返回成功。
 
 默认 home 为：
 

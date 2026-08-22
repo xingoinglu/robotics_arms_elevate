@@ -76,17 +76,17 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'initialization_duration',
-            default_value='12.0',
+            default_value='6.0',
             description='Minimum direct Ready motion duration in seconds.',
         ),
         DeclareLaunchArgument(
             'initialization_speed_percent',
-            default_value='12',
+            default_value='20',
             description='Piper speed percentage during initialization.',
         ),
         DeclareLaunchArgument(
             'initialization_max_step',
-            default_value='0.002',
+            default_value='0.006',
             description='Maximum nominal 50 Hz initialization step.',
         ),
         DeclareLaunchArgument(
@@ -134,6 +134,18 @@ def generate_launch_description():
                 'Expose the opt-in /return_all_joints_zero service.'
             ),
         ),
+        DeclareLaunchArgument(
+            'zero_velocity_scaling_factor',
+            default_value='0.10',
+            description='MoveIt velocity scaling for all-joint zero return.',
+        ),
+        DeclareLaunchArgument(
+            'zero_acceleration_scaling_factor',
+            default_value='0.10',
+            description=(
+                'MoveIt acceleration scaling for all-joint zero return.'
+            ),
+        ),
         DeclareLaunchArgument('use_rviz', default_value='true'),
         DeclareLaunchArgument('enable_handeye_tf', default_value='true'),
         DeclareLaunchArgument(
@@ -145,7 +157,7 @@ def generate_launch_description():
             'floor_number',
             default_value='1',
             description=(
-                'Default 0-9 floor used by an explicit sequence goal.'
+                'Default one- or two-digit floor used by a sequence goal.'
             ),
         ),
 
@@ -426,6 +438,12 @@ def generate_launch_description():
         'start_joint_zero_return',
         {
             'enable_motion': LaunchConfiguration('enable_motion'),
+            'zero_velocity_scaling_factor': LaunchConfiguration(
+                'zero_velocity_scaling_factor'
+            ),
+            'zero_acceleration_scaling_factor': LaunchConfiguration(
+                'zero_acceleration_scaling_factor'
+            ),
         },
     )
 

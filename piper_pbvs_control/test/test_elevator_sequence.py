@@ -15,6 +15,7 @@ from piper_pbvs_control.elevator_sequence import (
     home_joint_errors,
     make_home_moveit_goal,
     normalize_floor_target,
+    normalize_floor_targets,
     validate_home_joint_positions,
 )
 
@@ -37,11 +38,33 @@ def test_floor_target_uses_default_or_request(
     assert normalize_floor_target(requested, default_floor) == expected
 
 
-@pytest.mark.parametrize('target', ['10', '-1', 'ok', 'key_ok', 'floor_3'])
+@pytest.mark.parametrize('target', ['-1', 'ok', 'key_ok', 'floor_3'])
 def test_floor_target_rejects_non_numeric_buttons(target):
     """The sequence API only accepts one numeric elevator key."""
     with pytest.raises(ValueError):
         normalize_floor_target(target, 1)
+
+
+@pytest.mark.parametrize(
+    ('requested', 'default_floor', 'expected'),
+    [
+        ('10', 1, ('key_1', 'key_0')),
+        ('key_10', 1, ('key_1', 'key_0')),
+        ('', 10, ('key_1', 'key_0')),
+    ],
+)
+def test_two_digit_floor_is_split_into_two_button_targets(
+    requested,
+    default_floor,
+    expected,
+):
+    assert normalize_floor_targets(requested, default_floor) == expected
+
+
+@pytest.mark.parametrize('target', ['100', 'key_100', '1.0'])
+def test_floor_target_rejects_more_than_two_or_invalid_digits(target):
+    with pytest.raises(ValueError):
+        normalize_floor_targets(target, 1)
 
 
 def test_home_positions_require_six_finite_values():
@@ -199,6 +222,62 @@ def test_sequence_order_is_number_home_ok_home():
     assert result.success is True
     assert calls == [
         ('PRESS_NUMBER', 'key_4'),
+        ('RETURN_AFTER_NUMBER', 'home'),
+        ('PRESS_OK', 'key_ok'),
+        ('RETURN_AFTER_OK', 'home'),
+        ('RESULT', 'success'),
+    ]
+
+
+def test_two_digit_sequence_returns_home_after_each_digit():
+    """Floor 10 is key_1, home, key_0, home, key_ok, and home."""
+    import threading
+
+    from piper_pbvs_control.elevator_sequence import ElevatorSequence
+
+    calls = []
+
+    class FakeSequence:
+        floor_number = 1
+        current_state = 'IDLE'
+        active_press_goal = None
+        active_move_goal = None
+        active_lock = threading.Lock()
+        task_active = True
+
+        def get_logger(self):
+            return SimpleNamespace(info=lambda *_: None, error=lambda *_: None)
+
+        def _run_press(self, _goal, target, state):
+            calls.append((state, target))
+
+        def _run_home(self, _goal, state):
+            calls.append((state, 'home'))
+
+        def _set_state(self, state):
+            self.current_state = state
+
+        def _result(self, success, message):
+            return SimpleNamespace(success=success, message=message)
+
+    class FakeGoal:
+        request = SimpleNamespace(target_name='10')
+
+        def succeed(self):
+            calls.append(('RESULT', 'success'))
+
+        def abort(self):
+            calls.append(('RESULT', 'abort'))
+
+        def canceled(self):
+            calls.append(('RESULT', 'canceled'))
+
+    result = ElevatorSequence._execute_sequence(FakeSequence(), FakeGoal())
+    assert result.success is True
+    assert calls == [
+        ('PRESS_NUMBER', 'key_1'),
+        ('RETURN_AFTER_NUMBER', 'home'),
+        ('PRESS_NUMBER', 'key_0'),
         ('RETURN_AFTER_NUMBER', 'home'),
         ('PRESS_OK', 'key_ok'),
         ('RETURN_AFTER_OK', 'home'),

@@ -101,7 +101,7 @@ ros2 action send_goal /press_button \
   "{target_name: 'key_3'}" --feedback
 ```
 
-完整的“数字键→回初始位→OK→回初始位”任务必须显式发送另一个 Action；
+完整的“逐位数字键→每位后回初始位→OK→回初始位”任务必须显式发送另一个 Action；
 启动节点本身不会运动。空目标使用 `floor_number`（默认 1）：
 
 ```bash
@@ -116,6 +116,14 @@ ros2 action send_goal /run_elevator_sequence \
 ros2 action send_goal /run_elevator_sequence \
   piper_msgs/action/PressButton \
   "{target_name: '3'}" --feedback
+```
+
+楼层 10 会严格执行 `key_1 → home → key_0 → home → key_ok → home`：
+
+```bash
+ros2 action send_goal /run_elevator_sequence \
+  piper_msgs/action/PressButton \
+  "{target_name: '10'}" --feedback
 ```
 
 启动时可设置默认数字和六轴初始位：
@@ -260,6 +268,11 @@ ros2 launch piper_launch all.launch.py \
 | `start_joint_zero_return` | `true` | 提供 `/return_all_joints_zero` 手动归零服务；启动时不会自动运动 |
 | `use_rviz` | `true` | 随 MoveIt 启动 RViz |
 | `enable_motion` | `false` | 真机运动开关；开启前必须完成轨迹控制器验收 |
+| `initialization_duration` | `6.0` | `/initialize_arm` 最短插值时长，单位秒 |
+| `initialization_speed_percent` | `20` | `/initialize_arm` 使用的 Piper 速度百分比 |
+| `initialization_max_step` | `0.006` | `/initialize_arm` 在 50 Hz 下的最大名义步长，单位 rad |
+| `zero_velocity_scaling_factor` | `0.10` | 七关节归零的 MoveIt 速度缩放 |
+| `zero_acceleration_scaling_factor` | `0.10` | 七关节归零的 MoveIt 加速度缩放 |
 | `orientation_mode` | `preserve_current_roll` | 保持任务起始滚转；`world_up` 为旧行为 |
 | `moveit_velocity_scaling_factor` | `0.07` | 粗定位和 panel-normal 按压的 MoveIt 速度缩放（7%） |
 | `moveit_acceleration_scaling_factor` | `0.07` | 粗定位和 panel-normal 按压的 MoveIt 加速度缩放（7%） |

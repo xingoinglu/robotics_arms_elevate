@@ -49,9 +49,19 @@ ros2 action send_goal /run_elevator_sequence \
   "{target_name: '3'}" --feedback
 ```
 
+两位楼层会按每位数字依次执行，并在每次按键后回位。例如楼层 10：
+
+```bash
+ros2 action send_goal /run_elevator_sequence \
+  piper_msgs/action/PressButton \
+  "{target_name: '10'}" --feedback
+```
+
+严格顺序为 `key_1 → home → key_0 → home → key_ok → home`。
+
 只有收到该 Action 请求才会执行序列；仅启动节点或设置参数不会运动。目标只
-接受 `0`～`9`、`key_0`～`key_9` 或空字符串。数字键识别失败时，现有单键
-Action 会在发出 MoveIt 运动前中止。若单键任务已经进入 MoveIt 初定位或
+接受一位或两位数字、对应的 `key_` 前缀形式或空字符串。数字键识别失败时，
+现有单键 Action 会在发出 MoveIt 运动前中止。若单键任务已经进入 MoveIt 初定位或
 按压移动后返回失败，编排节点会先尝试回到 `home_joint_positions`，然后将
 整个任务标记失败；恢复回位失败或数字键正常回位失败时均不会继续按 OK。
 
@@ -97,6 +107,15 @@ ros2 launch piper_pbvs_control joint_zero_return.launch.py \
 
 独立状态话题为 `/joint_zero_return/state`。该节点不订阅按钮状态，也不会调用
 `/press_button`。
+
+默认归零速度和加速度缩放均为 `0.10`。如需临时覆盖，可直接给节点传参：
+
+```bash
+ros2 launch piper_pbvs_control joint_zero_return.launch.py \
+  enable_motion:=true \
+  zero_velocity_scaling_factor:=0.10 \
+  zero_acceleration_scaling_factor:=0.10
+```
 
 可在总启动命令中覆盖，例如：
 

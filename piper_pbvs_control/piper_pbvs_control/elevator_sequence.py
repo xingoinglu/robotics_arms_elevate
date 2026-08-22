@@ -43,16 +43,30 @@ class SequenceCanceled(RuntimeError):
     """Raised when the caller cancels an elevator sequence."""
 
 
-def normalize_floor_target(requested_target, default_floor):
-    """Return ``key_N`` for an empty, numeric, or ``key_N`` input."""
+def normalize_floor_targets(requested_target, default_floor):
+    """Return one or two ``key_N`` targets for a numeric floor input."""
     target = str(requested_target).strip()
     if not target:
         target = str(default_floor).strip()
     if target.startswith('key_'):
         target = target[4:]
-    if len(target) != 1 or target not in '0123456789':
-        raise ValueError('floor target must be one digit from 0 to 9')
-    return f'key_{target}'
+    if (
+        not 1 <= len(target) <= 2
+        or not target.isascii()
+        or not target.isdigit()
+    ):
+        raise ValueError(
+            'floor target must contain one or two digits from 0 to 9'
+        )
+    return tuple(f'key_{digit}' for digit in target)
+
+
+def normalize_floor_target(requested_target, default_floor):
+    """Return one ``key_N`` target for legacy single-digit callers."""
+    targets = normalize_floor_targets(requested_target, default_floor)
+    if len(targets) != 1:
+        raise ValueError('single floor target must contain exactly one digit')
+    return targets[0]
 
 
 def validate_home_joint_positions(values):
@@ -214,7 +228,7 @@ class ElevatorSequence(Node):
         self.floor_number = int(
             self.get_parameter('floor_number').value
         )
-        normalize_floor_target('', self.floor_number)
+        normalize_floor_targets('', self.floor_number)
         self.home_joint_positions = validate_home_joint_positions(
             self.get_parameter('home_joint_positions').value
         )
@@ -283,7 +297,7 @@ class ElevatorSequence(Node):
     def _goal_callback(self, goal_request):
         """Reject invalid floor targets and concurrent sequences."""
         try:
-            normalize_floor_target(
+            normalize_floor_targets(
                 goal_request.target_name,
                 self.floor_number,
             )
@@ -536,25 +550,32 @@ class ElevatorSequence(Node):
         )
 
     def _execute_sequence(self, goal_handle):
-        """Execute number, home, OK, and final home in strict order."""
+        """Press each floor digit with a home return, then OK and home."""
         try:
-            floor_target = normalize_floor_target(
+            floor_targets = normalize_floor_targets(
                 goal_handle.request.target_name,
                 self.floor_number,
             )
+            floor_label = ', '.join(floor_targets)
             self.get_logger().info(
-                f'【电梯任务开始】数字键={floor_target}, '
-                '随后按 key_ok'
+                f'【电梯任务开始】数字键={floor_label}, '
+                '每个数字后回位，随后按 key_ok'
             )
-            self._run_press(goal_handle, floor_target, 'PRESS_NUMBER')
-            self._run_home(goal_handle, 'RETURN_AFTER_NUMBER')
+            for floor_target in floor_targets:
+                self._run_press(
+                    goal_handle,
+                    floor_target,
+                    'PRESS_NUMBER',
+                )
+                self._run_home(goal_handle, 'RETURN_AFTER_NUMBER')
             self._run_press(goal_handle, 'key_ok', 'PRESS_OK')
             self._run_home(goal_handle, 'RETURN_AFTER_OK')
             self._set_state('DONE')
             goal_handle.succeed()
             return self._result(
                 True,
-                f'{floor_target}, home, key_ok, and final home completed',
+                f'{floor_label}, each followed by home, key_ok, and '
+                'final home completed',
             )
         except SequenceCanceled as error:
             self._set_state('ABORT')
