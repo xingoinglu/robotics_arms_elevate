@@ -1,33 +1,36 @@
 # elevate_ws ROS 2 功能包源码说明
 
-> 工作区：`/home/xie/elevate_ws`  
+> 工作区：本仓库根目录（下文命令示例使用 `~/elevate_ws`）  
 > 文档依据：当前 `src/` 下的实际源码、接口定义、Launch、YAML、URDF/SRDF 和测试  
-> 最后整理：2026-08-11  
+> 最后整理：2026-08-22  
 > ROS 版本背景：代码和原项目说明主要面向 ROS 2 Humble / Ubuntu 22.04  
 > 包识别方式：`package.xml`、`colcon list`、构建文件、节点源码、launch、URDF/SRDF、消息接口和配置文件交叉核对
 
-本文侧重说明“每个 ROS 功能包包含什么、彼此如何连接”。电梯业务状态机和算法公式的
+本仓库基于 ROS 2 Humble，集成 Piper 六轴机械臂、Orbbec RGB-D 相机、YOLO 按钮识别、
+手眼坐标变换和 MoveIt 规划，用于完成电梯楼层按钮定位、按压、回位及关节归零。
+本文侧重说明“每个 ROS 功能包包含什么、彼此如何连接”；实际启动命令见
+[运行按电梯任务指令.md](./运行按电梯任务指令.md)，电梯业务状态机和算法公式的
 展开说明见 [电梯项目流程与算法说明.md](./电梯项目流程与算法说明.md)。
 
 ## 1. 阅读范围与结论摘要
 
 当前工作区可被 `colcon` 识别的 ROS 2 功能包共有 **13 个**：
 
-| 序号 | 功能包 | 构建类型 | 主要职责 | 当前定位 |
-|---:|---|---|---|---|
-| 1 | `orbbec_camera` | `ament_cmake` | Orbbec RGB-D 相机驱动、图像/深度/点云/IMU/TF 发布及设备控制 | 核心硬件驱动 |
-| 2 | `orbbec_camera_msgs` | `ament_cmake` + rosidl | Orbbec 驱动专用消息和服务 | 相机接口定义 |
-| 3 | `orbbec_description` | `ament_cmake` | 多款 Orbbec 相机的 URDF、网格模型和 RViz 展示 | 相机模型资源 |
-| 4 | `piper` | `ament_python` | 通过 CAN 和 Piper SDK 控制单台真实机械臂 | 真机底层驱动 |
-| 5 | `piper_description` | `ament_cmake` | Piper 的 URDF/Xacro、Gazebo 和 MuJoCo 模型、网格及 RViz 配置 | 机器人模型资源 |
-| 6 | `piper_msgs` | `ament_cmake` + rosidl | Piper 状态、位姿命令、视觉目标和夹爪 Action 接口 | 项目公共接口 |
-| 7 | `piper_with_gripper_moveit` | `ament_cmake` | 以 `tcp_link` 为末端、单夹爪控制关节的 MoveIt 配置 | 新的 TCP 抓取配置 |
-| 8 | `piper_moveit_config_v5` | `ament_cmake` | 以 `link6` 为机械臂末端、双指关节控制的 MoveIt 配置 | 旧/另一套 MoveIt 配置 |
-| 9 | `piper_tf` | `ament_python` | 手眼标定静态 TF 发布及目标点坐标变换 | 坐标系桥接 |
-| 10 | `piper_vision` | `ament_python` | YOLO11 RGB-D 三维定位、按钮表面位姿、ChArUco 检测和 VLM 语义地图 | 视觉感知 |
-| 11 | `piper_grasp_control_by_ros` | `ament_python` | 接收目标并调用 MoveIt，另提供夹爪 Action Server | 抓取任务控制 |
-| 12 | `piper_pbvs_control` | `ament_python` | 单键视觉定位、MoveIt 运动和“数字键→回位→OK→回位”任务编排 | 当前电梯任务控制 |
-| 13 | `piper_launch` | `ament_python` | 安全默认地编排相机、真机、MoveIt、视觉和电梯任务节点 | 当前总启动包 |
+| 序号 | 功能包                       | 构建类型               | 主要职责                                                     | 当前定位              |
+| ---: | ---------------------------- | ---------------------- | ------------------------------------------------------------ | --------------------- |
+|    1 | `orbbec_camera`              | `ament_cmake`          | Orbbec RGB-D 相机驱动、图像/深度/点云/IMU/TF 发布及设备控制  | 核心硬件驱动          |
+|    2 | `orbbec_camera_msgs`         | `ament_cmake` + rosidl | Orbbec 驱动专用消息和服务                                    | 相机接口定义          |
+|    3 | `orbbec_description`         | `ament_cmake`          | 多款 Orbbec 相机的 URDF、网格模型和 RViz 展示                | 相机模型资源          |
+|    4 | `piper`                      | `ament_python`         | 通过 CAN 和 Piper SDK 控制单台真实机械臂                     | 真机底层驱动          |
+|    5 | `piper_description`          | `ament_cmake`          | Piper 的 URDF/Xacro、Gazebo 和 MuJoCo 模型、网格及 RViz 配置 | 机器人模型资源        |
+|    6 | `piper_msgs`                 | `ament_cmake` + rosidl | Piper 状态、位姿命令、视觉目标和夹爪 Action 接口             | 项目公共接口          |
+|    7 | `piper_with_gripper_moveit`  | `ament_cmake`          | 以 `tcp_link` 为末端、单夹爪控制关节的 MoveIt 配置           | 新的 TCP 抓取配置     |
+|    8 | `piper_moveit_config_v5`     | `ament_cmake`          | 以 `link6` 为机械臂末端、双指关节控制的 MoveIt 配置          | 旧/另一套 MoveIt 配置 |
+|    9 | `piper_tf`                   | `ament_python`         | 手眼标定静态 TF 发布及目标点坐标变换                         | 坐标系桥接            |
+|   10 | `piper_vision`               | `ament_python`         | YOLO11 RGB-D 三维定位、按钮表面位姿、ChArUco 检测和 VLM 语义地图 | 视觉感知              |
+|   11 | `piper_grasp_control_by_ros` | `ament_python`         | 接收目标并调用 MoveIt，另提供夹爪 Action Server              | 抓取任务控制          |
+|   12 | `piper_pbvs_control`         | `ament_python`         | 单键视觉定位、MoveIt 运动、多位数字逐键回位、确认键及七关节归零 | 当前电梯任务控制      |
+|   13 | `piper_launch`               | `ament_python`         | 安全默认地编排相机、真机、MoveIt、视觉和电梯任务节点         | 当前总启动包          |
 
 `src/piper_sim/piper_gazebo` 和 `src/piper_sim/piper_mujoco` 已从当前源码删除，
 因此不再是可构建功能包。`src/piper_control` 也不是 ROS 功能包：
@@ -45,13 +48,13 @@
 
 功能包按用途可分为：
 
-| 分层 | 功能包 |
-|---|---|
-| 设备与模型 | `orbbec_camera`、`orbbec_camera_msgs`、`orbbec_description`、`piper`、`piper_description` |
-| 公共接口与坐标 | `piper_msgs`、`piper_tf` |
-| 规划与执行 | `piper_with_gripper_moveit`、`piper_moveit_config_v5` |
-| 感知与任务 | `piper_vision`、`piper_pbvs_control`、`piper_launch` |
-| 旧/实验链路 | `piper_grasp_control_by_ros`、非 ROS 目录 `piper_control` |
+| 分层           | 功能包                                                       |
+| -------------- | ------------------------------------------------------------ |
+| 设备与模型     | `orbbec_camera`、`orbbec_camera_msgs`、`orbbec_description`、`piper`、`piper_description` |
+| 公共接口与坐标 | `piper_msgs`、`piper_tf`                                     |
+| 规划与执行     | `piper_with_gripper_moveit`、`piper_moveit_config_v5`        |
+| 感知与任务     | `piper_vision`、`piper_pbvs_control`、`piper_launch`         |
+| 旧/实验链路    | `piper_grasp_control_by_ros`、非 ROS 目录 `piper_control`    |
 
 ### 1.2 系统的主要数据流
 
@@ -70,8 +73,10 @@ flowchart LR
     Vision --> AllObj[/piper_vision/all_object_points<br/>AllObjectPos]
     Vision --> ButtonPose[/piper_vision/button_pose<br/>PoseStamped]
     SequenceGoal[/run_elevator_sequence<br/>PressButton Action] --> Sequence[elevator_sequence]
-    Sequence -->|数字键 / key_ok| PressGoal
-    Sequence -->|两次关节回位| MoveIt
+    Sequence -->|每位数字 / key_ok| PressGoal
+    Sequence -->|每次按键后关节回位| MoveIt
+    ZeroService[/return_all_joints_zero<br/>Trigger Service] --> ZeroNode[joint_zero_return]
+    ZeroNode -->|arm 后 gripper| MoveIt
     PressGoal[/press_button<br/>PressButton Action] --> PBVS[piper_pbvs_control]
     ButtonPose --> PBVS
     RobotFeedback[/tcp_pose + /arm_status] --> PBVS
@@ -92,8 +97,10 @@ flowchart LR
 Action 目标名经 `/set_interest` 选择唯一 YOLO 类别，视觉节点发布
 `base_link` 下的 `/piper_vision/button_pose`，`piper_pbvs_control` 通过 MoveIt
 完成粗定位，并可选沿 `base_link X` 或锁定的面板法向推进。独立的
-`elevator_sequence` 节点把单键任务编排为“数字键 → 初始关节位 → `key_ok`
-→ 初始关节位”。当前实现不再发布 `/pos_cmd`，不执行连续 PBVS 精调；推进只以
+`elevator_sequence` 节点支持一位或两位楼层，把单键任务编排为“逐位数字键 → 每位后
+返回初始关节位 → `key_ok` → 返回初始关节位”。例如 10 楼执行
+`key_1 → home → key_0 → home → key_ok → home`。当前实现不再发布 `/pos_cmd`，
+不执行连续 PBVS 精调；推进只以
 目标位姿到达为成功条件，没有力/触觉或按钮灯反馈，不能据此证明按钮实际触发。
 
 旧的通用抓取原型仍是另一条独立链路。它订阅 `/base_target_point`
@@ -102,12 +109,12 @@ Action 目标名经 `/set_interest` 选择唯一 YOLO 类别，视觉节点发�
 
 ### 1.3 当前控制路径
 
-| 路径 | 控制入口 | 状态来源 | 典型用途 |
-|---|---|---|---|
-| 真机 CAN | `piper` 订阅关节或末端命令，再调用 `piper_sdk` | Piper CAN 反馈 | 实际机械臂控制 |
-| 真机单键任务 | MoveIt 经真机轨迹桥执行粗定位和可选推进 | `/joint_states`、`/tcp_pose`、`/arm_status` 和锁定的按钮位姿 | 数字键或 `key_ok` 定位；默认不推进 |
-| 完整电梯序列 | `/run_elevator_sequence` 调用两次单键 Action 和两次 MoveIt 回位 | 单键 Action 结果和真实关节反馈 | 数字键 → 回位 → OK → 回位 |
-| MoveIt FakeSystem | MoveIt 内置 `mock_components/GenericSystem` | 仿真 `/joint_states` | 离线规划和 RViz 演示 |
+| 路径              | 控制入口                                                     | 状态来源                                                     | 典型用途                                 |
+| ----------------- | ------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------- |
+| 真机 CAN          | `piper` 订阅关节或末端命令，再调用 `piper_sdk`               | Piper CAN 反馈                                               | 实际机械臂控制                           |
+| 真机单键任务      | MoveIt 经真机轨迹桥执行粗定位和可选推进                      | `/joint_states`、`/tcp_pose`、`/arm_status` 和锁定的按钮位姿 | 数字键或 `key_ok` 定位；默认不推进       |
+| 完整电梯序列      | `/run_elevator_sequence` 逐位调用单键 Action，并在每次按键后 MoveIt 回位 | 单键 Action 结果和真实关节反馈                               | 一位/两位楼层数字 → 逐键回位 → OK → 回位 |
+| MoveIt FakeSystem | MoveIt 内置 `mock_components/GenericSystem`                  | 仿真 `/joint_states`                                         | 离线规划和 RViz 演示                     |
 
 `piper_description` 仍保留 Gazebo Xacro 和 MuJoCo XML 资源，但当前工作区
 没有可直接启动它们的 `piper_gazebo` / `piper_mujoco` ROS 功能包。
@@ -143,14 +150,14 @@ Rockchip 或 NVIDIA Jetson 的 JPEG 硬件解码。
 
 ### 2.2 主要可执行程序
 
-| 可执行程序 | 作用 |
-|---|---|
-| `orbbec_camera_node` | 主相机驱动；注册为 `rclcpp_components` 组件，也可以独立进程运行 |
-| `list_devices_node` | 枚举 Orbbec 设备及基本信息 |
-| `list_depth_work_mode_node` | 查询相机支持的深度工作模式 |
-| `list_camera_profile_mode_node` | 查询相机支持的流配置/分辨率/帧率 |
-| `topic_statistics_node` | 对图像话题和 ROS 统计消息做统计 |
-| `frame_latency_node` | 测量 Image、PointCloud2、IMU、Metadata、CameraInfo、RGBD、TF 等话题的帧率/延迟 |
+| 可执行程序                      | 作用                                                         |
+| ------------------------------- | ------------------------------------------------------------ |
+| `orbbec_camera_node`            | 主相机驱动；注册为 `rclcpp_components` 组件，也可以独立进程运行 |
+| `list_devices_node`             | 枚举 Orbbec 设备及基本信息                                   |
+| `list_depth_work_mode_node`     | 查询相机支持的深度工作模式                                   |
+| `list_camera_profile_mode_node` | 查询相机支持的流配置/分辨率/帧率                             |
+| `topic_statistics_node`         | 对图像话题和 ROS 统计消息做统计                              |
+| `frame_latency_node`            | 测量 Image、PointCloud2、IMU、Metadata、CameraInfo、RGBD、TF 等话题的帧率/延迟 |
 
 主节点既支持普通 `Node`，也支持 `ComposableNodeContainer` 中的进程内通信。
 
@@ -158,25 +165,25 @@ Rockchip 或 NVIDIA Jetson 的 JPEG 硬件解码。
 
 实际话题以 `camera_name` 形成命名空间，默认 `camera_name=camera`：
 
-| 默认话题 | 类型 | 条件/含义 |
-|---|---|---|
-| `/camera/color/image_raw` | `sensor_msgs/msg/Image` | 彩色图 |
-| `/camera/color/camera_info` | `sensor_msgs/msg/CameraInfo` | 彩色相机内参与畸变参数 |
-| `/camera/depth/image_raw` | `sensor_msgs/msg/Image` | 深度图 |
-| `/camera/depth/camera_info` | `sensor_msgs/msg/CameraInfo` | 深度相机参数 |
-| `/camera/ir/image_raw` | `sensor_msgs/msg/Image` | 红外图；部分双目型号还会区分左右 IR |
-| `/camera/ir/camera_info` | `sensor_msgs/msg/CameraInfo` | 红外相机参数 |
-| `/camera/depth/points` | `sensor_msgs/msg/PointCloud2` | `enable_point_cloud=true` 时发布纯深度点云 |
-| `/camera/depth_registered/points` | `sensor_msgs/msg/PointCloud2` | `enable_colored_point_cloud=true` 时发布彩色点云 |
-| `/camera/accel/sample` | `sensor_msgs/msg/Imu` | 独立加速度流 |
-| `/camera/gyro/sample` | `sensor_msgs/msg/Imu` | 独立陀螺仪流 |
-| `/camera/gyro_accel/sample` | `sensor_msgs/msg/Imu` | 启用同步 IMU 输出时发布 |
-| `/camera/accel/imu_info`、`/camera/gyro/imu_info` | `orbbec_camera_msgs/msg/IMUInfo` | IMU 标定参数 |
-| `/camera/depth/metadata` 等 | `orbbec_camera_msgs/msg/Metadata` | 帧元数据 JSON |
-| `/camera/depth_to_color` 等 | `orbbec_camera_msgs/msg/Extrinsics` | 开启外参发布后输出各流之间外参 |
-| `/camera/depth_filter_status` | `std_msgs/msg/String` | 深度滤波状态 |
-| `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` | 当前主要报告相机温度 |
-| `/tf` 或 `/tf_static` | `tf2_msgs/msg/TFMessage` | `camera_link` 到各传感器 frame/optical frame |
+| 默认话题                                          | 类型                                  | 条件/含义                                        |
+| ------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
+| `/camera/color/image_raw`                         | `sensor_msgs/msg/Image`               | 彩色图                                           |
+| `/camera/color/camera_info`                       | `sensor_msgs/msg/CameraInfo`          | 彩色相机内参与畸变参数                           |
+| `/camera/depth/image_raw`                         | `sensor_msgs/msg/Image`               | 深度图                                           |
+| `/camera/depth/camera_info`                       | `sensor_msgs/msg/CameraInfo`          | 深度相机参数                                     |
+| `/camera/ir/image_raw`                            | `sensor_msgs/msg/Image`               | 红外图；部分双目型号还会区分左右 IR              |
+| `/camera/ir/camera_info`                          | `sensor_msgs/msg/CameraInfo`          | 红外相机参数                                     |
+| `/camera/depth/points`                            | `sensor_msgs/msg/PointCloud2`         | `enable_point_cloud=true` 时发布纯深度点云       |
+| `/camera/depth_registered/points`                 | `sensor_msgs/msg/PointCloud2`         | `enable_colored_point_cloud=true` 时发布彩色点云 |
+| `/camera/accel/sample`                            | `sensor_msgs/msg/Imu`                 | 独立加速度流                                     |
+| `/camera/gyro/sample`                             | `sensor_msgs/msg/Imu`                 | 独立陀螺仪流                                     |
+| `/camera/gyro_accel/sample`                       | `sensor_msgs/msg/Imu`                 | 启用同步 IMU 输出时发布                          |
+| `/camera/accel/imu_info`、`/camera/gyro/imu_info` | `orbbec_camera_msgs/msg/IMUInfo`      | IMU 标定参数                                     |
+| `/camera/depth/metadata` 等                       | `orbbec_camera_msgs/msg/Metadata`     | 帧元数据 JSON                                    |
+| `/camera/depth_to_color` 等                       | `orbbec_camera_msgs/msg/Extrinsics`   | 开启外参发布后输出各流之间外参                   |
+| `/camera/depth_filter_status`                     | `std_msgs/msg/String`                 | 深度滤波状态                                     |
+| `/diagnostics`                                    | `diagnostic_msgs/msg/DiagnosticArray` | 当前主要报告相机温度                             |
+| `/tf` 或 `/tf_static`                             | `tf2_msgs/msg/TFMessage`              | `camera_link` 到各传感器 frame/optical frame     |
 
 `RGBD.msg` 已在消息包中定义，延迟测试工具也支持该类型，但当前主驱动源码没有直接创建
 RGBD 组合消息发布器；主流程仍以独立彩色图、深度图和 CameraInfo 为主。
@@ -259,24 +266,24 @@ ros2 launch orbbec_camera <对应型号>.launch.py depth_registration:=true
 
 ### 3.2 消息
 
-| 消息 | 字段与用途 |
-|---|---|
-| `DeviceInfo` | Header、设备名、序列号、固件版本、最低 SDK 版本、硬件版本 |
-| `Extrinsics` | Header、3×3 旋转矩阵、3 维平移 |
-| `IMUInfo` | 噪声密度、随机游走、参考温度、偏置、重力、比例/非正交矩阵、温漂 |
-| `Metadata` | Header + JSON 字符串 |
-| `RGBD` | Header、RGB/Depth CameraInfo、RGB 图和深度图 |
+| 消息         | 字段与用途                                                   |
+| ------------ | ------------------------------------------------------------ |
+| `DeviceInfo` | Header、设备名、序列号、固件版本、最低 SDK 版本、硬件版本    |
+| `Extrinsics` | Header、3×3 旋转矩阵、3 维平移                               |
+| `IMUInfo`    | 噪声密度、随机游走、参考温度、偏置、重力、比例/非正交矩阵、温漂 |
+| `Metadata`   | Header + JSON 字符串                                         |
+| `RGBD`       | Header、RGB/Depth CameraInfo、RGB 图和深度图                 |
 
 ### 3.3 服务
 
-| 服务 | 含义 |
-|---|---|
-| `GetBool` | 返回布尔值、成功标志和消息 |
-| `GetInt32` | 返回整数、成功标志和消息 |
-| `GetString` | 返回字符串、成功标志和消息 |
-| `SetInt32` | 设置整数，返回成功标志和消息 |
-| `SetString` | 设置字符串，返回成功标志和消息 |
-| `GetCameraInfo` | 返回 `sensor_msgs/CameraInfo` |
+| 服务            | 含义                              |
+| --------------- | --------------------------------- |
+| `GetBool`       | 返回布尔值、成功标志和消息        |
+| `GetInt32`      | 返回整数、成功标志和消息          |
+| `GetString`     | 返回字符串、成功标志和消息        |
+| `SetInt32`      | 设置整数，返回成功标志和消息      |
+| `SetString`     | 设置字符串，返回成功标志和消息    |
+| `GetCameraInfo` | 返回 `sensor_msgs/CameraInfo`     |
 | `GetDeviceInfo` | 返回 `DeviceInfo`、成功标志和消息 |
 
 该包自身不运行节点。
@@ -338,17 +345,17 @@ Action，以及按钮任务 Action。
 
 ### 5.2 当前由 CMake 实际生成的接口
 
-| 接口 | 用途 |
-|---|---|
-| `PiperStatusMsg.msg` | 控制模式、机械臂状态、运动/示教状态、轨迹号、错误码、各关节限位与通信状态 |
-| `PosCmd.msg` | 末端 `x/y/z + roll/pitch/yaw + gripper + mode1/mode2` 命令 |
-| `ObjectPos.msg` | 单个目标的 Header、三维点、宽、高 |
-| `AllObjectPos.msg` | 多目标名称、三维点数组、宽度和高度数组 |
-| `Enable.srv` | 请求使能/失能机械臂，返回操作结果 |
-| `SetInterest.srv` | 请求设置关注目标名称，返回字符串结果 |
-| `PlayText.srv` | 请求播放文本并指定是否同步，返回成功标志 |
-| `GripperControl.action` | 目标夹爪角和宽度，返回成功标志及消息 |
-| `PressButton.action` | 以唯一 YOLO 类别名触发按钮任务，返回成功/消息，并反馈状态、位置误差、角度误差和目标年龄 |
+| 接口                    | 用途                                                         |
+| ----------------------- | ------------------------------------------------------------ |
+| `PiperStatusMsg.msg`    | 控制模式、机械臂状态、运动/示教状态、轨迹号、错误码、各关节限位与通信状态 |
+| `PosCmd.msg`            | 末端 `x/y/z + roll/pitch/yaw + gripper + mode1/mode2` 命令   |
+| `ObjectPos.msg`         | 单个目标的 Header、三维点、宽、高                            |
+| `AllObjectPos.msg`      | 多目标名称、三维点数组、宽度和高度数组                       |
+| `Enable.srv`            | 请求使能/失能机械臂，返回操作结果                            |
+| `SetInterest.srv`       | 请求设置关注目标名称，返回字符串结果                         |
+| `PlayText.srv`          | 请求播放文本并指定是否同步，返回成功标志                     |
+| `GripperControl.action` | 目标夹爪角和宽度，返回成功标志及消息                         |
+| `PressButton.action`    | 以唯一 YOLO 类别名触发按钮任务，返回成功/消息，并反馈状态、位置误差、角度误差和目标年龄 |
 
 ### 5.3 源码目录中存在、但当前 CMake 没有生成的接口
 
@@ -396,27 +403,27 @@ X 轴相对移动工具。
 
 ### 6.2 参数
 
-| 参数 | 默认值 | 含义 |
-|---|---:|---|
-| `can_port` | `can0` | SocketCAN 接口名 |
-| `auto_enable` | `false`（节点内） | 启动后是否自动尝试使能；单包 launch 默认 `true`，项目总入口显式传 `false` |
-| `gripper_exist` | `true` | 是否控制夹爪 |
-| `gripper_val_mutiple` | `1` | 夹爪行程倍率，限制到 0～10 |
-| `tcp_offset_x` | `0.0` | J6 坐标系中的 TCP X 偏移，单位 m |
-| `tcp_offset_y` | `0.0` | J6 坐标系中的 TCP Y 偏移，单位 m |
-| `tcp_offset_z` | `0.1468` | J6 坐标系中的标定 TCP Z 偏移，单位 m |
+| 参数                  |            默认值 | 含义                                                         |
+| --------------------- | ----------------: | ------------------------------------------------------------ |
+| `can_port`            |            `can0` | SocketCAN 接口名                                             |
+| `auto_enable`         | `false`（节点内） | 启动后是否自动尝试使能；单包 launch 默认 `true`，项目总入口显式传 `false` |
+| `gripper_exist`       |            `true` | 是否控制夹爪                                                 |
+| `gripper_val_mutiple` |               `1` | 夹爪行程倍率，限制到 0～10                                   |
+| `tcp_offset_x`        |             `0.0` | J6 坐标系中的 TCP X 偏移，单位 m                             |
+| `tcp_offset_y`        |             `0.0` | J6 坐标系中的 TCP Y 偏移，单位 m                             |
+| `tcp_offset_z`        |          `0.1468` | J6 坐标系中的标定 TCP Z 偏移，单位 m                         |
 
 ### 6.3 发布话题
 
-| 话题 | 类型 | 含义 |
-|---|---|---|
-| `/joint_states_single` | `sensor_msgs/msg/JointState` | 六轴角度、速度和夹爪位置/力反馈 |
-| `/joint_states` | `sensor_msgs/msg/JointState` | MoveIt 标准真实反馈，不修改六轴角度 |
-| `/joint_states_raw` | `sensor_msgs/msg/JointState` | joint1～joint7真实反馈，用于初始化安全检查 |
-| `/piper_command_enabled` | `std_msgs/msg/Bool` | 本次驱动进程是否会转发运动命令 |
-| `/arm_status` | `piper_msgs/msg/PiperStatusMsg` | 控制器、运动、故障及关节状态 |
-| `/end_pose` | `geometry_msgs/msg/Pose` | SDK 反馈的 J6 法兰位姿 |
-| `/tcp_pose` | `geometry_msgs/msg/PoseStamped` | 在 J6 位姿上叠加工具偏移后的 TCP 位姿，frame 为 `base_link` |
+| 话题                     | 类型                            | 含义                                                        |
+| ------------------------ | ------------------------------- | ----------------------------------------------------------- |
+| `/joint_states_single`   | `sensor_msgs/msg/JointState`    | 六轴角度、速度和夹爪位置/力反馈                             |
+| `/joint_states`          | `sensor_msgs/msg/JointState`    | MoveIt 标准真实反馈，不修改六轴角度                         |
+| `/joint_states_raw`      | `sensor_msgs/msg/JointState`    | joint1～joint7真实反馈，用于初始化安全检查                  |
+| `/piper_command_enabled` | `std_msgs/msg/Bool`             | 本次驱动进程是否会转发运动命令                              |
+| `/arm_status`            | `piper_msgs/msg/PiperStatusMsg` | 控制器、运动、故障及关节状态                                |
+| `/end_pose`              | `geometry_msgs/msg/Pose`        | SDK 反馈的 J6 法兰位姿                                      |
+| `/tcp_pose`              | `geometry_msgs/msg/PoseStamped` | 在 J6 位姿上叠加工具偏移后的 TCP 位姿，frame 为 `base_link` |
 
 单位转换：
 
@@ -431,11 +438,11 @@ X 轴相对移动工具。
 
 ### 6.4 订阅话题
 
-| 话题 | 类型 | 行为 |
-|---|---|---|
-| `/pos_cmd` | `piper_msgs/msg/PosCmd` | 切到末端控制并调用 SDK `EndPoseCtrl`；同时可控制夹爪 |
+| 话题                 | 类型                         | 行为                                                         |
+| -------------------- | ---------------------------- | ------------------------------------------------------------ |
+| `/pos_cmd`           | `piper_msgs/msg/PosCmd`      | 切到末端控制并调用 SDK `EndPoseCtrl`；同时可控制夹爪         |
 | `/joint_ctrl_single` | `sensor_msgs/msg/JointState` | 依据关节名读取 joint1～joint6，位置控制机械臂；第 7 个位置控制夹爪 |
-| `/enable_flag` | `std_msgs/msg/Bool` | 使能或失能机械臂和夹爪 |
+| `/enable_flag`       | `std_msgs/msg/Bool`          | 使能或失能机械臂和夹爪                                       |
 
 当前主真机 launch 不再把 `joint_ctrl_single` 重映射为 `/joint_states`：
 `/joint_states` 只发布反馈，`/joint_ctrl_single` 只接收真实轨迹控制器的命令，避免把
@@ -460,23 +467,40 @@ SDK 控制模式和速度参数。关节命令、末端命令也只有在节点�
 - `/joint_states_raw`、CAN位置反馈和六轴低速使能反馈均新鲜；
 - joint2/joint3 仅在配置阈值内小幅越过零位，其他关节仍在URDF限位内；
 
-满足条件后，控制器从真实起点生成S曲线插值，以默认50 Hz、12%速度和至少12秒时长，
-通过 `/joint_ctrl_single → JointCtrl` 直接移动到
+满足条件后，控制器从真实起点生成 S 曲线插值，通过
+`/joint_ctrl_single → JointCtrl` 直接移动到
 `[1.613151344, 0.18368532, -0.955564876, 0.10300682, 0.785450988, -0.042511028, 0.0]`
 的 joint1～joint7 Ready 姿态（joint1～joint6 单位为 rad，joint7 单位为 m）。该启动过程不进行路径避障规划；
 到位后用 `/check_state_validity` 验证最终真实状态。初始化成功前，普通
 FollowJointTrajectory目标会被拒绝。使能本身不会发布关节命令，因此调用初始化服务前
 仍保留自由手动摆放行为。
 
+由项目总入口 `all.launch.py` 启动时，初始化的当前默认参数为：
+
+| 参数                           |      默认值 | 含义                                                      |
+| ------------------------------ | ----------: | --------------------------------------------------------- |
+| `initialization_speed_percent` |        `20` | 初始化期间下发给 Piper 的速度百分比，控制器限制为 1%～20% |
+| `initialization_duration`      |     `6.0 s` | 从当前姿态到 Ready 姿态的最短插值时长                     |
+| `initialization_max_step`      | `0.006 rad` | 50 Hz 下的最大名义关节步长；位移较大时会自动延长总时长    |
+
+服务请求本身是无参数的 `Trigger`，速度必须在启动时设置：
+
+```bash
+ros2 service call /initialize_arm std_srvs/srv/Trigger "{}"
+```
+
+若直接单独运行控制器而不经过总 launch，节点源码内的后备默认值仍为 12%、12 秒和
+0.002 rad；推荐统一通过 `all.launch.py` 显式传入参数，避免启动方式不同造成速度差异。
+
 ### 6.6 `piper_move_x`
 
 该节点从最新 `/tcp_pose` 出发，只改变 `base_link` X，保持 Y/Z、
 姿态和夹爪开度。主要参数：
 
-| 参数 | 默认值 | 含义 |
-|---|---|---|
-| `distance_mm` | `0.0` | 有符号的 X 位移，范围 `-100～100 mm` |
-| `enable_motion` | `false` | 物理运动开关 |
+| 参数               | 默认值      | 含义                                           |
+| ------------------ | ----------- | ---------------------------------------------- |
+| `distance_mm`      | `0.0`       | 有符号的 X 位移，范围 `-100～100 mm`           |
+| `enable_motion`    | `false`     | 物理运动开关                                   |
 | `motion_algorithm` | `cartesian` | `cartesian` 直接末端控制，或 `moveit` 碰撞规划 |
 
 `cartesian` 以 10 Hz、每步最大 2 mm 向 `/pos_cmd` 发布插值法兰目标，
@@ -550,12 +574,12 @@ FollowJointTrajectory目标会被拒绝。使能本身不会发布关节命令�
 
 ### 7.4 MuJoCo 模型
 
-| 文件 | 作用 |
-|---|---|
-| `piper_description.xml` | 完整六轴 + 双指模型，并带目标点自由关节 |
-| `piper_no_gripper_description.xml` | 无夹爪完整六轴模型 |
+| 文件                                               | 作用                                         |
+| -------------------------------------------------- | -------------------------------------------- |
+| `piper_description.xml`                            | 完整六轴 + 双指模型，并带目标点自由关节      |
+| `piper_no_gripper_description.xml`                 | 无夹爪完整六轴模型                           |
 | `piper_no_gripper_anthropomorphic_description.xml` | 仅前三轴“拟人臂”子模型，用于表驱动位置表生成 |
-| `piper_no_gripper_wrist_description.xml` | 仅后三轴腕部子模型，用于姿态表生成 |
+| `piper_no_gripper_wrist_description.xml`           | 仅后三轴腕部子模型，用于姿态表生成           |
 
 ### 7.5 launch
 
@@ -599,10 +623,10 @@ KDL 同时为 `arm` 和 `gripper` 配置运动学插件。
 该配置的 `piper.ros2_control.xacro` 使用 `mock_components/GenericSystem`，
 标准 `demo.launch.py` 因此是 MoveIt 假硬件演示，不会直接访问 Piper CAN。
 
-| 控制器 | 关节 |
-|---|---|
-| `arm_controller` | `joint1`～`joint6` |
-| `gripper_controller` | 仅 `joint7` |
+| 控制器                    | 关节                 |
+| ------------------------- | -------------------- |
+| `arm_controller`          | `joint1`～`joint6`   |
+| `gripper_controller`      | 仅 `joint7`          |
 | `joint_state_broadcaster` | 发布 `/joint_states` |
 
 默认控制器更新率为 500 Hz；MoveIt 默认速度和加速度缩放均为 0.1。
@@ -652,17 +676,17 @@ KDL 同时为 `arm` 和 `gripper` 配置运动学插件。
 
 ### 9.2 与 `piper_with_gripper_moveit` 的关键差异
 
-| 项目 | `piper_moveit_config_v5` | `piper_with_gripper_moveit` |
-|---|---|---|
-| `arm` 末端 | `link6` | `tcp_link` |
-| arm 组定义 | 显式 joint1～joint6 + chain | `base_link` 到 `tcp_link` chain |
-| gripper 组 | `joint7` + `joint8` | `gripper_base` 到 `link7`，实际控制 joint7 |
-| 夹爪控制器 | joint7、joint8 | 仅 joint7 |
-| 预设状态 | arm zero/ready，gripper open/close | arm zero，gripper open/close |
-| 控制器更新率 | 100 Hz | 500 Hz |
-| 单关节最大速度 | 约 1.61993 rad/s | arm 多数 5 rad/s，joint6 3 rad/s |
-| 3D 传感器 YAML | 无 | 有 |
-| 自定义 Gazebo MoveIt launch | 无 | 有 `piper_moveit.launch.py` |
+| 项目                        | `piper_moveit_config_v5`           | `piper_with_gripper_moveit`                |
+| --------------------------- | ---------------------------------- | ------------------------------------------ |
+| `arm` 末端                  | `link6`                            | `tcp_link`                                 |
+| arm 组定义                  | 显式 joint1～joint6 + chain        | `base_link` 到 `tcp_link` chain            |
+| gripper 组                  | `joint7` + `joint8`                | `gripper_base` 到 `link7`，实际控制 joint7 |
+| 夹爪控制器                  | joint7、joint8                     | 仅 joint7                                  |
+| 预设状态                    | arm zero/ready，gripper open/close | arm zero，gripper open/close               |
+| 控制器更新率                | 100 Hz                             | 500 Hz                                     |
+| 单关节最大速度              | 约 1.61993 rad/s                   | arm 多数 5 rad/s，joint6 3 rad/s           |
+| 3D 传感器 YAML              | 无                                 | 有                                         |
+| 自定义 Gazebo MoveIt launch | 无                                 | 有 `piper_moveit.launch.py`                |
 
 ### 9.3 使用边界
 
@@ -730,13 +754,13 @@ link6 -> camera_link
 
 参数：
 
-| 参数 | 默认值 |
-|---|---|
-| `parent_frame` | `link6` |
-| `camera_link_frame` | `camera_link` |
-| `calibrated_frame` | `camera_link` |
-| `handeye_matrix` | `config/handeye.yaml` 中的 4×4 矩阵 |
-| `lookup_retry_period` | `0.5` 秒 |
+| 参数                  | 默认值                              |
+| --------------------- | ----------------------------------- |
+| `parent_frame`        | `link6`                             |
+| `camera_link_frame`   | `camera_link`                       |
+| `calibrated_frame`    | `camera_link`                       |
+| `handeye_matrix`      | `config/handeye.yaml` 中的 4×4 矩阵 |
+| `lookup_retry_period` | `0.5` 秒                            |
 
 `handeye_static_tf.launch.py` 加载 YAML，并允许覆盖三个 frame 名称。
 
@@ -783,22 +807,22 @@ ChArUco 位姿估计、VLM 语义地图。
 
 重要参数：
 
-| 参数 | 默认值 | 含义 |
-|---|---:|---|
-| `model_path` | 无，必填 | YOLO11 Detect `.pt` 的绝对路径 |
-| `device` | 空 | 留空由 Ultralytics 自动选择，也可设 `cpu`、`cuda:0` |
-| `interest` | `all` | 精确模型类别名，或发布所有目标的 `all` |
-| `depth_threshold` | `2.0` | 背景移除深度阈值，单位 m |
-| `depth_scale` | `0.001` | 原始深度值到米的换算比例 |
-| `box_roi_inset` | `0.25` | 检测框四边向内缩进比例 |
-| `conf_threshold` | `0.7` | 检测置信度阈值 |
-| `iou_threshold` | `0.45` | NMS IoU 阈值 |
-| `bg_removal` | `false` | 是否移除深度阈值外背景；总入口也默认 false |
-| `target_frame_id` | `base_link` | 三维目标输出坐标系 |
-| `camera_frame_id` | 空 | 空时采用 CameraInfo 的 `frame_id` |
-| `camera_info_topic` | `/camera/color/camera_info` | 相机参数 |
-| `color_image_topic` | `/camera/color/image_raw` | 彩色图 |
-| `depth_image_topic` | `/camera/depth/image_raw` | 必须与彩色图对齐的深度图 |
+| 参数                |                      默认值 | 含义                                                |
+| ------------------- | --------------------------: | --------------------------------------------------- |
+| `model_path`        |                    无，必填 | YOLO11 Detect `.pt` 的绝对路径                      |
+| `device`            |                          空 | 留空由 Ultralytics 自动选择，也可设 `cpu`、`cuda:0` |
+| `interest`          |                       `all` | 精确模型类别名，或发布所有目标的 `all`              |
+| `depth_threshold`   |                       `2.0` | 背景移除深度阈值，单位 m                            |
+| `depth_scale`       |                     `0.001` | 原始深度值到米的换算比例                            |
+| `box_roi_inset`     |                      `0.25` | 检测框四边向内缩进比例                              |
+| `conf_threshold`    |                       `0.7` | 检测置信度阈值                                      |
+| `iou_threshold`     |                      `0.45` | NMS IoU 阈值                                        |
+| `bg_removal`        |                     `false` | 是否移除深度阈值外背景；总入口也默认 false          |
+| `target_frame_id`   |                 `base_link` | 三维目标输出坐标系                                  |
+| `camera_frame_id`   |                          空 | 空时采用 CameraInfo 的 `frame_id`                   |
+| `camera_info_topic` | `/camera/color/camera_info` | 相机参数                                            |
+| `color_image_topic` |   `/camera/color/image_raw` | 彩色图                                              |
+| `depth_image_topic` |   `/camera/depth/image_raw` | 必须与彩色图对齐的深度图                            |
 
 按钮平面质量参数包括 `plane_outer_scale=2.0`、
 `plane_inner_scale=1.0`、`plane_ransac_threshold=0.003 m`、
@@ -810,12 +834,12 @@ ChArUco 位姿估计、VLM 语义地图。
 
 发布：
 
-| 话题 | 类型 | 含义 |
-|---|---|---|
-| `/piper_vision/pred_image` | `sensor_msgs/msg/Image` | 检测标注图 |
-| `/piper_vision/target_point` | `piper_msgs/msg/ObjectPos` | 类别等于 `interest` 的目标 |
-| `/piper_vision/all_object_points` | `piper_msgs/msg/AllObjectPos` | 所有通过阈值的目标 |
-| `/piper_vision/button_pose` | `geometry_msgs/msg/PoseStamped` | 选定按钮的中心和按压方向，仅唯一类别且平面质量合格时发布 |
+| 话题                              | 类型                            | 含义                                                     |
+| --------------------------------- | ------------------------------- | -------------------------------------------------------- |
+| `/piper_vision/pred_image`        | `sensor_msgs/msg/Image`         | 检测标注图                                               |
+| `/piper_vision/target_point`      | `piper_msgs/msg/ObjectPos`      | 类别等于 `interest` 的目标                               |
+| `/piper_vision/all_object_points` | `piper_msgs/msg/AllObjectPos`   | 所有通过阈值的目标                                       |
+| `/piper_vision/button_pose`       | `geometry_msgs/msg/PoseStamped` | 选定按钮的中心和按压方向，仅唯一类别且平面质量合格时发布 |
 
 节点还创建 `/set_interest` 服务，类型为 `piper_msgs/srv/SetInterest`。
 请求字段 `name` 必须是模型中的精确类别名或 `all`；未知类别会返回可用类别列表。
@@ -855,11 +879,11 @@ frame、图像话题和平面拟合参数都暴露为 launch 参数，是当前�
 
 输出：
 
-| 输出 | 类型 | 含义 |
-|---|---|---|
-| `/aruco_single/pose` | `geometry_msgs/msg/PoseStamped` | 标定板位姿 |
-| `/aruco_single/result` | `sensor_msgs/msg/Image` | 经制 marker、角点和坐标轴的图像 |
-| `marker_frame` TF | 动态 TF | 默认 child 为 `camera_marker` |
+| 输出                   | 类型                            | 含义                            |
+| ---------------------- | ------------------------------- | ------------------------------- |
+| `/aruco_single/pose`   | `geometry_msgs/msg/PoseStamped` | 标定板位姿                      |
+| `/aruco_single/result` | `sensor_msgs/msg/Image`         | 经制 marker、角点和坐标轴的图像 |
+| `marker_frame` TF      | 动态 TF                         | 默认 child 为 `camera_marker`   |
 
 若设置 `reference_frame=base_link`，节点会查询 TF，把相机坐标中的板位姿转换到
 `base_link` 后再发布。`charuco_single.launch.py` 默认同时启用手眼 TF，并把输入重映射到
@@ -936,11 +960,11 @@ Orbbec 彩色图和 CameraInfo。
 
 输入：
 
-| 名称 | 类型 | 规则 |
-|---|---|---|
-| `/base_target_point` | `geometry_msgs/msg/PointStamped` | 只使用位置；代码没有验证其 `frame_id` |
-| `/base_target_pose` | `geometry_msgs/msg/PoseStamped` | 必须为 `base_link`；检查有限值并归一化四元数 |
-| `/grasp_command` | `std_srvs/srv/Trigger` | 触发一次 MoveIt 规划和执行 |
+| 名称                 | 类型                             | 规则                                         |
+| -------------------- | -------------------------------- | -------------------------------------------- |
+| `/base_target_point` | `geometry_msgs/msg/PointStamped` | 只使用位置；代码没有验证其 `frame_id`        |
+| `/base_target_pose`  | `geometry_msgs/msg/PoseStamped`  | 必须为 `base_link`；检查有限值并归一化四元数 |
+| `/grasp_command`     | `std_srvs/srv/Trigger`           | 触发一次 MoveIt 规划和执行                   |
 
 目标选择采用“最后一个有效目标覆盖前一个”的策略：
 
@@ -993,10 +1017,12 @@ Orbbec 彩色图和 CameraInfo。
 
 ### 14.1 作用与状态机
 
-这是当前电梯按钮任务的上层控制包，包含两个协作节点：
+这是当前电梯按钮任务的上层控制包，包含两个任务节点和一个独立归零节点：
 
 - `piper_pbvs_controller`：完成一个指定按钮的视觉锁定、MoveIt 粗定位和可选推进；
-- `elevator_sequence`：调用单键 Action 和 MoveIt 回位，将两个按钮任务编排成完整选层序列。
+- `elevator_sequence`：调用单键 Action 和 MoveIt 回位，把一位或两位楼层数字及确认键
+  编排成完整选层序列；
+- `joint_zero_return`：显式收到服务请求后，使用 MoveIt 将 joint1～joint7 依次归零。
 
 包名和节点名仍保留 `pbvs`，但当前实现不执行连续图像闭环 PBVS。单键状态机为：
 
@@ -1011,34 +1037,36 @@ IDLE
 
 同一时间只接受一个非空 `target_name` 任务。取消、超时、目标丢失、
 机械臂故障或实测到位验收失败都会进入 `ABORT`。成功后机械臂保持在最终
-位姿，不由单键控制器自动回撤。完整序列状态机为：
+位姿，不由单键控制器自动回撤。完整序列会针对每一位楼层数字重复
+`PRESS_NUMBER → RETURN_AFTER_NUMBER`，然后按下确认键：
 
 ```text
 IDLE
-  → (PRESS_NUMBER → RETURN_AFTER_NUMBER) × 楼层位数
+  → PRESS_NUMBER
+  → RETURN_AFTER_NUMBER
   → PRESS_OK
   → RETURN_AFTER_OK
   → DONE / ABORT
   → IDLE
 ```
 
-完整序列中的两次 `RETURN_*` 是 MoveIt 关节空间回位，因此能在数字键和
-`key_ok` 之间恢复统一观察姿态。
+完整序列中的 `RETURN_*` 是 MoveIt 关节空间回位，因此能在每一位数字键以及
+`key_ok` 之后恢复统一观察姿态。
 
 ### 14.2 单键控制器 ROS 接口
 
-| 方向 | 名称 | 类型 | 用途 |
-|---|---|---|---|
-| Action Server | `/press_button` | `piper_msgs/action/PressButton` | 以唯一 YOLO 类别名触发按钮任务 |
-| 订阅 | `/piper_vision/button_pose` | `geometry_msgs/msg/PoseStamped` | `base_link` 下的实时按钮中心和按压方向 |
-| 订阅 | `/tcp_pose` | `geometry_msgs/msg/PoseStamped` | 真机实测 TCP 位姿 |
-| 订阅 | `/joint_states` | `sensor_msgs/msg/JointState` | MoveIt 六轴关节实测反馈 |
-| 订阅 | `/arm_status` | `piper_msgs/msg/PiperStatusMsg` | 错误码、关节限位和通信故障 |
-| Service Client | `/set_interest` | `piper_msgs/srv/SetInterest` | 把 Action 目标名同步给 YOLO |
-| Service Client | `/apply_planning_scene` | `moveit_msgs/srv/ApplyPlanningScene` | 加入面板和眼在手上相机碰撞体 |
-| Action Client | `/move_action` | `moveit_msgs/action/MoveGroup` | 规划/执行粗定位和可选推进 |
-| 发布 | `/pbvs/state` | `std_msgs/msg/String` | 当前状态 |
-| 发布 | `/pbvs/desired_tcp_pose` | `geometry_msgs/msg/PoseStamped` | 调试用目标 TCP |
+| 方向           | 名称                        | 类型                                 | 用途                                   |
+| -------------- | --------------------------- | ------------------------------------ | -------------------------------------- |
+| Action Server  | `/press_button`             | `piper_msgs/action/PressButton`      | 以唯一 YOLO 类别名触发按钮任务         |
+| 订阅           | `/piper_vision/button_pose` | `geometry_msgs/msg/PoseStamped`      | `base_link` 下的实时按钮中心和按压方向 |
+| 订阅           | `/tcp_pose`                 | `geometry_msgs/msg/PoseStamped`      | 真机实测 TCP 位姿                      |
+| 订阅           | `/joint_states`             | `sensor_msgs/msg/JointState`         | MoveIt 六轴关节实测反馈                |
+| 订阅           | `/arm_status`               | `piper_msgs/msg/PiperStatusMsg`      | 错误码、关节限位和通信故障             |
+| Service Client | `/set_interest`             | `piper_msgs/srv/SetInterest`         | 把 Action 目标名同步给 YOLO            |
+| Service Client | `/apply_planning_scene`     | `moveit_msgs/srv/ApplyPlanningScene` | 加入面板和眼在手上相机碰撞体           |
+| Action Client  | `/move_action`              | `moveit_msgs/action/MoveGroup`       | 规划/执行粗定位和可选推进              |
+| 发布           | `/pbvs/state`               | `std_msgs/msg/String`                | 当前状态                               |
+| 发布           | `/pbvs/desired_tcp_pose`    | `geometry_msgs/msg/PoseStamped`      | 调试用目标 TCP                         |
 
 Action 反馈包含当前状态、位置误差、角度误差和目标数据年龄。
 
@@ -1067,19 +1095,21 @@ Action 反馈包含当前状态、位置误差、角度误差和目标数据年�
 
 关键默认约束：
 
-| 参数 | 默认值 | 含义 |
-|---|---:|---|
-| `enable_motion` | `false` | false 时 MoveIt 仅规划 |
-| `coarse_standoff` | `0.08 m` | TCP 相对按钮的法向后退距离 |
-| `coarse_horizontal_offset` | `0.0 m` | 按钮局部 +X 补偿，面向面板时正值向左 |
-| `coarse_lateral_error_min/max` | `0.009 / 0.019 m` | 实测面板切平面误差的闭区间 |
-| `coarse_axial_tolerance` | `0.01 m` | 实测法向距离误差上限 |
-| `coarse_correction_attempts` | `3` | 首次执行后的重试数，真机总计最多 4 次 |
-| `distance_mm` | `0.0` | 粗定位后的有符号推进距离，范围 `±100 mm` |
-| `x_advance_axis_mode` | `base_x` | `base_x` 沿基座 X；`panel_normal` 沿视觉按压轴 |
-| `stable_sample_count` | `3` | 稳定目标样本数 |
-| `target_acquire_timeout` | `5.0 s` | 等待稳定按钮位姿的超时 |
-| `tcp_feedback_timeout` | `0.5 s` | TCP 反馈新鲜度要求 |
+| 参数                                 |            默认值 | 含义                                                   |
+| ------------------------------------ | ----------------: | ------------------------------------------------------ |
+| `enable_motion`                      |           `false` | false 时 MoveIt 仅规划                                 |
+| `coarse_standoff`                    |          `0.08 m` | TCP 相对按钮的法向后退距离                             |
+| `coarse_horizontal_offset`           |           `0.0 m` | 按钮局部 +X 补偿，面向面板时正值向左                   |
+| `coarse_lateral_error_min/max`       | `0.009 / 0.019 m` | 实测面板切平面误差的闭区间；小于下限或大于上限均不通过 |
+| `coarse_axial_tolerance`             |          `0.01 m` | 实测法向距离误差上限                                   |
+| `coarse_correction_attempts`         |               `3` | 首次执行后的重试数，真机总计最多 4 次                  |
+| `distance_mm`                        |             `0.0` | 粗定位后的有符号推进距离，范围 `±100 mm`               |
+| `x_advance_axis_mode`                |          `base_x` | `base_x` 沿基座 X；`panel_normal` 沿视觉按压轴         |
+| `moveit_velocity_scaling_factor`     |            `0.07` | 粗定位、校正及推进的 MoveIt 速度缩放为 7%              |
+| `moveit_acceleration_scaling_factor` |            `0.07` | 粗定位、校正及推进的 MoveIt 加速度缩放为 7%            |
+| `stable_sample_count`                |               `3` | 稳定目标样本数                                         |
+| `target_acquire_timeout`             |           `5.0 s` | 等待稳定按钮位姿的超时                                 |
+| `tcp_feedback_timeout`               |           `0.5 s` | TCP 反馈新鲜度要求                                     |
 
 节点持续检查 `err_code`、六轴角度限位和六轴通信状态。`distance_mm` 只定义目标
 位移，不包含接触力、按钮行程或按钮灯判据，不应解读为有反馈保证的真实按压。
@@ -1090,17 +1120,23 @@ Action 反馈包含当前状态、位置误差、角度误差和目标数据年�
 `piper_msgs/action/PressButton` 类型。目标规范化规则为：
 
 - 空字符串：读取 `floor_number` 参数，默认 `1`；
-- 一位或两位数字：逐位转换成 `key_0`～`key_9`；
-- `key_` 加一位或两位数字：同样逐位转换；
+- 一位或两位数字（如 `3`、`10`）：按字符转换成一个或两个 `key_N`；
+- 带 `key_` 前缀的一位或两位数字（如 `key_3`、`key_10`）：移除前缀后按位转换；
 - 其他字符串：拒绝 Action goal。
 
 严格执行过程：
 
-1. 对楼层的每一位数字调用 `/press_button` 定位/推进对应的 `key_N`；
-2. 每按完一位数字，都用 `/move_action` 回到 `home_joint_positions`；
-3. 所有数字完成后调用 `/press_button` 定位/推进 `key_ok`；
+1. 按楼层数字顺序调用 `/press_button` 定位/推进对应 `key_N`；
+2. 每完成一位数字，都用 `/move_action` 回到 `home_joint_positions`；
+3. 所有数字完成后，调用 `/press_button` 定位/推进 `key_ok`；
 4. 再次用 `/move_action` 回到初始关节位；
-5. 所有按钮和全部回位均成功后才返回成功。
+5. 所有按键和回位全部成功后才返回成功。
+
+例如 10 楼的严格顺序为：
+
+```text
+key_1 → home → key_0 → home → key_ok → home
+```
 
 默认 home 为：
 
@@ -1117,14 +1153,14 @@ Action 反馈包含当前状态、位置误差、角度误差和目标数据年�
 
 序列接口：
 
-| 方向 | 名称 | 类型 | 用途 |
-|---|---|---|---|
-| Action Server | `/run_elevator_sequence` | `piper_msgs/action/PressButton` | 完整数字键、回位、OK、回位任务 |
-| Action Client | `/press_button` | `piper_msgs/action/PressButton` | 调用单键任务 |
-| Action Client | `/move_action` | `moveit_msgs/action/MoveGroup` | 两次关节回位和失败恢复回位 |
-| 订阅 | `/joint_states` | `sensor_msgs/msg/JointState` | 真机回位验收 |
-| 订阅 | `/pbvs/state` | `std_msgs/msg/String` | 判断子任务是否已进入运动阶段 |
-| 发布 | `/elevator_sequence/state` | `std_msgs/msg/String` | 完整任务状态 |
+| 方向          | 名称                       | 类型                            | 用途                                    |
+| ------------- | -------------------------- | ------------------------------- | --------------------------------------- |
+| Action Server | `/run_elevator_sequence`   | `piper_msgs/action/PressButton` | 一位/两位数字逐键回位、OK、最终回位任务 |
+| Action Client | `/press_button`            | `piper_msgs/action/PressButton` | 调用单键任务                            |
+| Action Client | `/move_action`             | `moveit_msgs/action/MoveGroup`  | 每次按键后的关节回位和失败恢复回位      |
+| 订阅          | `/joint_states`            | `sensor_msgs/msg/JointState`    | 真机回位验收                            |
+| 订阅          | `/pbvs/state`              | `std_msgs/msg/String`           | 判断子任务是否已进入运动阶段            |
+| 发布          | `/elevator_sequence/state` | `std_msgs/msg/String`           | 完整任务状态                            |
 
 ### 14.6 launch 与测试
 
@@ -1138,6 +1174,29 @@ Action 反馈包含当前状态、位置误差、角度误差和目标数据年�
 测试覆盖这些纯数学逻辑、控制器诊断输出、楼层目标规范化、回位目标构造、关节反馈
 验收、完整序列顺序、失败阻断和运动阶段失败后的回位恢复分支。
 
+### 14.7 七关节归零 `joint_zero_return`
+
+`joint_zero_return` 提供 `/return_all_joints_zero`（`std_srvs/srv/Trigger`）。服务被显式
+调用后，先规划/执行 arm 组的 joint1～joint6 到 `0 rad`，再规划/执行 gripper 组的
+joint7 到 `0 m`；真机模式最后使用新鲜 `/joint_states` 验收。默认六轴容差为
+`0.01 rad`，joint7 容差为 `0.003 m`。
+
+| 参数                               |   默认值 | 含义                                     |
+| ---------------------------------- | -------: | ---------------------------------------- |
+| `enable_motion`                    |  `false` | false 时只验证两段归零规划，不向真机下发 |
+| `zero_velocity_scaling_factor`     |   `0.10` | 两段 MoveIt 归零规划的速度缩放为 10%     |
+| `zero_acceleration_scaling_factor` |   `0.10` | 两段 MoveIt 归零规划的加速度缩放为 10%   |
+| `zero_timeout`                     | `30.0 s` | 每个 MoveIt 归零任务的等待超时           |
+
+总 launch 默认 `start_joint_zero_return=true`，因此会提供该服务，但不会自动执行归零：
+
+```bash
+ros2 service call /return_all_joints_zero std_srvs/srv/Trigger "{}"
+```
+
+服务请求不携带速度。需要在启动 `all.launch.py` 时通过
+`zero_velocity_scaling_factor` 和 `zero_acceleration_scaling_factor` 设置。
+
 ## 15. `piper_launch`
 
 路径：`src/piper_launch`
@@ -1150,9 +1209,11 @@ Action 反馈包含当前状态、位置误差、角度误差和目标数据年�
 2. `piper/start_single_piper.launch.py`
 3. `piper_with_gripper_moveit/real_feedback_demo.launch.py`
 4. `piper_pbvs_control/elevator_press.launch.py`
+5. `piper_pbvs_control/joint_zero_return.launch.py`
 
-最后一个入口会继续启动视觉、手眼 TF、单键控制器和完整序列编排器，因此总启动后
-同时提供 `/press_button` 与 `/run_elevator_sequence` 两个任务入口。
+第 4 个入口会继续启动视觉、手眼 TF、单键控制器和完整序列编排器，因此总启动后
+会提供 `/press_button`、`/run_elevator_sequence` 和 `/return_all_joints_zero`。归零节点
+由第 5 个入口启动，服务只有收到显式请求才执行。
 
 默认面向 Gemini 335L、`can0` 和 Conda 环境 `yolo11`。YOLO 模型
 由 `model_path` 或环境变量 `PIPER_MODEL_PATH` 提供，两者都未设置时为空路径。
@@ -1169,6 +1230,15 @@ Action 反馈包含当前状态、位置误差、角度误差和目标数据年�
 - `enable_handeye_tf=true`
 - `orientation_mode=preserve_current_roll`
 - `distance_mm=0.0`
+- `start_joint_zero_return=true`
+- `initialization_speed_percent=20`
+- `initialization_duration=6.0`
+- `initialization_max_step=0.006`
+- `moveit_velocity_scaling_factor=0.07`
+- `moveit_acceleration_scaling_factor=0.07`
+- `zero_velocity_scaling_factor=0.10`
+- `zero_acceleration_scaling_factor=0.10`
+- `coarse_lateral_error_min/max=0.009/0.019 m`
 
 因此默认启动不会自动使能真机，控制器只请求 MoveIt 规划。
 MoveIt 入口同时启动真实 `piper_trajectory_controller`，只有显式设置
@@ -1177,8 +1247,8 @@ MoveIt 入口同时启动真实 `piper_trajectory_controller`，只有显式设�
 `enable_press` 参数。
 
 总 launch 还透传 CAN 接口、夹爪倍率、TCP 偏移、相机名/序列号/USB 口、YOLO 设备、
-手眼 TF、平面拟合质量、粗定位水平补偿、横向验收区间、校正次数和
-`distance_mm` 等参数。模型路径不再硬编码到旧工作区。
+手眼 TF、平面拟合质量、初始化速度、MoveIt 定位/回位/归零速度、粗定位水平补偿、
+横向验收区间、校正次数和 `distance_mm` 等参数。模型路径不再硬编码到旧工作区。
 
 ### 15.3 `diagnostic.launch.py`
 
@@ -1229,10 +1299,13 @@ MoveIt → FollowJointTrajectory → piper_trajectory_controller
 轨迹控制器同时用第二个只读 SocketCAN socket 检查 `0x2A5`～`0x2A7`
 关节反馈和 `0x261`～`0x266` 六轴使能反馈的新鲜度，拒绝重复
 `/joint_states` 发布者，并实现轨迹限位、线性插值、路径/终点误差、取消保持和
-Action 错误传播。普通 MoveIt 轨迹默认使用 10% 速度，六轴终点误差需各自小于
-0.01 rad 并连续稳定 5 个反馈周期。控制器每次启动默认关闭真实轨迹门，只有显式调用
-`/initialize_arm`、低速 JointCtrl 到达 Ready 并通过最终状态检查后才开放。单键控制器仍用
-`/tcp_pose` 验证实测 TCP，并用 `/arm_status` 做故障保护。
+Action 错误传播。MoveIt 配置的通用默认速度/加速度缩放为 10%，但当前 PBVS 粗定位、
+校正、panel-normal 推进及序列 home 回位都在目标中显式使用 7%；七关节归零默认显式使用
+10%。`trajectory_speed_percent` 是 Piper 轨迹桥的硬件侧速度百分比，默认 10%，与 MoveIt
+缩放不是同一个参数。六轴终点误差需各自小于 0.01 rad 并连续稳定 5 个反馈周期。
+控制器每次启动默认关闭真实轨迹门，只有显式调用 `/initialize_arm`，按总 launch 默认
+20% 速度、至少 6 秒且单步不超过 0.006 rad 到达 Ready，并通过最终状态检查后才开放。
+单键控制器仍用 `/tcp_pose` 验证实测 TCP，并用 `/arm_status` 做故障保护。
 
 按钮任务不再在 MoveIt 关节模式与 `/pos_cmd` 末端模式之间切换，
 但桥接方案仍不是标准 `ros2_control SystemInterface`。MoveIt 真机轨迹已不再
@@ -1247,7 +1320,22 @@ Action 错误传播。普通 MoveIt 轨迹默认使用 10% 速度，六轴终点
 以下命令按当前源码入口整理。所有真机操作都应先确认 CAN、TF、初始关节状态、碰撞场景
 和物理急停。
 
-### 17.1 只启动真实机械臂
+### 17.1 构建与加载工作区
+
+首次克隆仓库或修改 `src/` 中的 Python、YAML、launch 默认值后，在工作区根目录构建：
+
+```bash
+cd ~/elevate_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+若只是修改 `ros2 launch ... 参数:=值` 的本次启动值，不需要重新构建，停止并重新启动
+launch 即可。每个新终端仍需加载 `/opt/ros/humble/setup.bash` 和
+`install/setup.bash`。
+
+### 17.2 只启动真实机械臂
 
 ```bash
 source install/setup.bash
@@ -1260,7 +1348,7 @@ ros2 launch piper start_single_piper.launch.py \
 
 注意先正确配置 CAN，并在安全工作区内操作。
 
-### 17.2 Orbbec + 手眼 TF + YOLO 三维定位
+### 17.3 Orbbec + 手眼 TF + YOLO 三维定位
 
 终端 1：
 
@@ -1283,7 +1371,7 @@ ros2 launch piper_vision yolo_handeye.launch.py \
 输出目标在 `/piper_vision/target_point`；选择唯一类别且平面拟合合格时，还会输出
 `/piper_vision/button_pose`。
 
-### 17.3 电梯按钮单键安全 dry-run
+### 17.4 电梯按钮单键安全 dry-run
 
 ```bash
 ros2 launch piper_launch all.launch.py \
@@ -1303,7 +1391,7 @@ ros2 action send_goal /press_button \
 默认流程应为 `WAIT_TARGET → COARSE_APPROACH → DONE → IDLE`。它会调用 MoveIt
 做 `plan_only`，但不会自动使能机械臂，也不会下发真机轨迹。
 
-### 17.4 完整电梯序列 dry-run
+### 17.5 完整电梯序列 dry-run
 
 总系统启动后，发送空目标会使用 `floor_number`（默认 1）：
 
@@ -1324,7 +1412,34 @@ ros2 action send_goal /run_elevator_sequence \
 完整顺序为 `key_3 → home → key_ok → home`。在 `enable_motion=false` 下，两次单键
 和两次回位都只规划不执行。仅启动节点或设置 `floor_number` 不会自动开始任务。
 
-### 17.5 单独测试 `piper_move_x`
+两位楼层按数字逐位执行，例如 10 楼：
+
+```bash
+ros2 action send_goal /run_elevator_sequence \
+  piper_msgs/action/PressButton \
+  "{target_name: '10'}" --feedback
+```
+
+顺序为 `key_1 → home → key_0 → home → key_ok → home`。
+
+机械臂已使能且总 launch 使用 `enable_motion:=true` 时，可先初始化到 Ready：
+
+```bash
+ros2 service call /initialize_arm std_srvs/srv/Trigger "{}"
+```
+
+需要把 joint1～joint7 全部归零时，显式调用：
+
+```bash
+ros2 service call /return_all_joints_zero std_srvs/srv/Trigger "{}"
+```
+
+前者速度由 `initialization_speed_percent`、`initialization_duration` 和
+`initialization_max_step` 控制；后者速度由 `zero_velocity_scaling_factor` 和
+`zero_acceleration_scaling_factor` 控制。这些参数均在启动 `all.launch.py` 时设置，
+不能通过 `Trigger "{}"` 请求临时传入。
+
+### 17.6 单独测试 `piper_move_x`
 
 ```bash
 ros2 run piper piper_move_x --ros-args \
@@ -1338,7 +1453,7 @@ ros2 run piper piper_move_x --ros-args \
 MoveIt 真机入口和轨迹桥，并完成 `/initialize_arm`。
 
 
-### 17.6 MoveIt FakeSystem 独立演示
+### 17.7 MoveIt FakeSystem 独立演示
 
 ```bash
 ros2 launch piper_with_gripper_moveit demo.launch.py
@@ -1347,7 +1462,7 @@ ros2 launch piper_with_gripper_moveit demo.launch.py
 这只是 GenericSystem 假硬件。不应与 `real_feedback_demo.launch.py` 或真机总启动
 同时运行，否则会出现重复的 MoveIt、TF 或 `/joint_states` 来源。
 
-### 17.7 ChArUco 位姿检测
+### 17.8 ChArUco 位姿检测
 
 先启动 Orbbec，再运行：
 
@@ -1430,10 +1545,10 @@ ros2 launch piper_vision charuco_single.launch.py
 
 1. 按相机 → 手眼 TF → 平面法线 → MoveIt dry-run → 真机初定位
    → 可选推进 → 回位 → `key_ok` → 再回位的顺序验收。
-2. 核实 `coarse_lateral_error_min/max` 使用“误差下限”的业务意图；
-   通常位姿误差只有上限，当前 23～32 mm 闭区间会拒绝更小的横向误差。
-3. 统一节点内置默认 `25～35 mm` 与 YAML/launch 实际透传的 `23～32 mm`，
-   避免不同启动方式得到不同验收结果。
+2. 当前 `coarse_lateral_error_min/max=9～19 mm` 是闭区间，会拒绝小于 9 mm 的横向误差；
+   继续真机标定时应核实保留“误差下限”是否符合末端结构的实际补偿需求。
+3. 保持节点、YAML、子 launch 和总 launch 的 9～19 mm 默认区间一致，修改后同时检查
+   `ros2 param dump /piper_pbvs_controller` 的运行时生效值。
 4. 如要恢复真实接触按压，需重新设计力/触觉检测、合规末端、位移/速度限制和回撤策略；
    不应把当前 `distance_mm` 直接当作按压功能。
 
@@ -1519,14 +1634,15 @@ piper_launch
 - YOLO11 Detect RGB-D 三维目标定位和面板法线估计；
 - ChArUco 位姿检测；
 - 视觉引导的 MoveIt 单键粗定位 + 可选双模式推进 Action；
-- “数字键 → 回位 → `key_ok` → 回位”的完整电梯任务 Action；
+- 一位/两位楼层数字逐键回位、再按 `key_ok` 并最终回位的完整电梯任务 Action；
+- 需要显式调用的 joint1～joint7 MoveIt 归零服务；
 - 安全默认的电梯按钮总启动入口；
 - MoveIt 抓取任务原型；
 - VLM 语义地图；
 
 相机 → 手眼 TF → YOLO 按钮位姿 → `/press_button` → MoveIt → 真机反馈验收的
-单键链路已经闭合，`/run_elevator_sequence` 又在其上完成两次单键任务和两次关节
-回位编排。系统默认禁用自动使能和物理运动。真机反馈已通过
+单键链路已经闭合，`/run_elevator_sequence` 又在其上完成每位楼层数字、确认键和每次
+按键后的关节回位编排。系统默认禁用自动使能和物理运动。真机反馈已通过
 `/joint_states` 接入 MoveIt/TF，MoveIt 轨迹也已通过受保护的轨迹桥进入 CAN。
 
 当前实现的边界必须明确：默认只做规划；真机模式默认只完成按钮前粗定位；配置
